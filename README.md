@@ -22,6 +22,34 @@ Analyzes the exported hourly CSV data and produces a detailed performance report
 - Anomaly detection, annual projection, carbon offset estimation
 - **180-test suite** included
 
+## Installation
+
+### Install the skills
+
+Add both skills to your Claude Code project configuration (`.claude/settings.json`):
+
+```json
+{
+  "skills": [
+    "/path/to/solar-skills/soliscloud-export-hourly",
+    "/path/to/solar-skills/solar-analysis"
+  ]
+}
+```
+
+Or install them from the GitHub repo:
+
+```json
+{
+  "skills": [
+    "https://github.com/marfillaster/solar-skills/tree/main/soliscloud-export-hourly",
+    "https://github.com/marfillaster/solar-skills/tree/main/solar-analysis"
+  ]
+}
+```
+
+Once installed, the `/soliscloud-export-hourly` and `/solar-analysis` slash commands become available in Claude Code.
+
 ## Quick Start
 
 ### 1. Set up SolisCloud API credentials
