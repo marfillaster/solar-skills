@@ -98,7 +98,7 @@ solar-skills/
 ## Requirements
 
 - Python 3
-- Claude Code (to run as skills)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — requires a Claude Pro/Max subscription or an Anthropic API key
 - SolisCloud account with API access
 - Optional: `xlrd` (only for Chrome fallback XLS processing)
 
