@@ -90,8 +90,25 @@ solar-skills/
 ## Requirements
 
 - Python 3
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — requires a Claude Pro/Max subscription or an Anthropic API key
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - SolisCloud account with API access
+
+### Claude Code authentication
+
+Claude Code requires one of the following:
+
+| Auth method | Export paths available |
+|---|---|
+| **Pro/Max subscription** | API export + Chrome fallback |
+| **API key (pay-as-you-go)** | API export only |
+
+To use an API key: sign up at [console.anthropic.com](https://console.anthropic.com/), add billing, generate a key, then set it in your shell profile:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+The Chrome fallback requires a Pro/Max subscription for MCP tool access (`--chrome` flag).
 
 ## CSV Format
 
