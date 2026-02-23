@@ -57,8 +57,8 @@ Optional: `SOLISCLOUD_TIMEZONE` — integer UTC offset (e.g. `8` for UTC+8). Def
 
 If API credentials aren't configured, the skill falls back to Chrome browser automation:
 
+- Active Anthropic Pro/Max subscription (the `--chrome` flag requires Pro/Max for MCP tool access)
 - Claude Code running with `--chrome` flag
-- Active Anthropic Pro/Max subscription (for MCP tool access)
 - Logged into SolisCloud in Chrome
 
 ## Usage
