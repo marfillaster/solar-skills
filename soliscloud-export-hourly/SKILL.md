@@ -97,26 +97,39 @@ This script:
 
 ---
 
+## Output Schema
+
+Both export paths produce identical CSV output. The solar-analysis skill depends on this exact schema.
+
+**File:** `data/solar_hourly_YYYY-MM.csv`
+
+```
+Date,Hour,Readings,Avg_PV_W,PV_Energy_kWh,Avg_Battery_W,Battery_Energy_kWh,Avg_Grid_W,Grid_Energy_kWh,Avg_GridLoad_W,GridLoad_Energy_kWh,Avg_BackupLoad_W,BackupLoad_Energy_kWh,Avg_SOC_Pct,Min_SOC_Pct,Max_SOC_Pct
+```
+
+| Column | Description |
+|---|---|
+| `Date` | Date (YYYY-MM-DD) |
+| `Hour` | Hour bucket (HH:00) |
+| `Readings` | Number of 5-min readings in this hour (typically 12) |
+| `Avg_*_W` | Average watts for the hour |
+| `*_Energy_kWh` | `avg_watts × readings × 5 / 60 / 1000` |
+| `Avg_SOC_Pct` | Average battery state of charge (%) |
+| `Min_SOC_Pct` / `Max_SOC_Pct` | SOC range within the hour |
+
+**Power units:** The SolisCloud JSON API (`/api/chart/station/day/v2`) returns power values in watts despite `powerStr` labelling them as "kW". The Chrome export script uses these values directly. To verify: compare one day's `Avg_PV_W` against the SolisCloud dashboard's Operating Data chart — they should match without any ×1000 scaling.
+
+---
+
 ## Chrome Fallback Path
 
-### 3B. Pre-flight checks and user setup
+### 3B. Pre-flight checks
 
-Before starting, verify requirements and gather settings using AskUserQuestion.
-
-**Remind the user of system requirements:**
+Remind the user of requirements using AskUserQuestion:
 
 > **Before we begin, please confirm:**
 > - Claude Code is running with `--chrome` flag (required for browser automation)
-> - You have an active Anthropic Pro/Max subscription (required for MCP tool access)
-> - In Chrome settings (chrome://settings/downloads), **"Ask where to save each file before downloading"** is **disabled** — the bulk export downloads multiple files automatically and save-as dialogs will block the process
 > - You are logged into [SolisCloud](https://www.soliscloud.com) in Chrome
-
-**Ask for Chrome download folder:**
-
-Use AskUserQuestion:
-- **"Where does Chrome save downloaded files?"** — `~/Downloads` (Default) / Other (specify path)
-
-Store the answer as `DOWNLOADS_DIR` for use in step 8B.
 
 ### 4B. Navigate to SolisCloud plant details
 
@@ -124,174 +137,87 @@ Store the answer as `DOWNLOADS_DIR` for use in step 8B.
 - Navigate to: `https://www.soliscloud.com/overview/plantStation`
 - Click the first row in the Plant List table to open plant details.
 - Wait for the Overview page to load (URL should contain `/details/overview/`).
+- Extract the **Station ID** from the URL — the 19-digit number after `/overview/` (e.g. `1298491919450376600`). Store as `STATION_ID`.
 
 ### 5B. Navigate to any day in the target month
 
 - The Operating Data panel has a date picker showing the current date and Day/Month/Year/Lifetime tabs.
 - Ensure the **Day** tab is selected (orange text).
-- Use the `<` and `>` arrows next to the date to navigate to any day within the target month. It doesn't matter which day — we just need to be viewing the target month so the export button and auth context are correct.
+- Use the `<` and `>` arrows next to the date to navigate to any day within the target month.
 
-### 6B. Install bulk download interceptor
+### 6B. Install request capture interceptor
 
-Inject the following JavaScript via `javascript_tool`. This intercepts the next export XHR, captures auth headers and request body, then replays the request for every day in the target month.
-
-```javascript
-// Bulk export interceptor for SolisCloud
-(function() {
-  const TARGET_MONTH = '__TARGET_MONTH__'; // replaced by agent, e.g. '2026-01'
-
-  // Calculate all days in the month
-  const [year, month] = TARGET_MONTH.split('-').map(Number);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const days = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    days.push(`${TARGET_MONTH}-${String(d).padStart(2, '0')}`);
-  }
-
-  window.__bulkExport = {
-    status: 'waiting_for_trigger',
-    total: days.length,
-    completed: 0,
-    failed: [],
-    days: days
-  };
-
-  // Intercept XMLHttpRequest
-  const origOpen = XMLHttpRequest.prototype.open;
-  const origSend = XMLHttpRequest.prototype.send;
-  let intercepted = false;
-
-  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-    this.__url = url;
-    this.__method = method;
-    return origOpen.call(this, method, url, ...rest);
-  };
-
-  XMLHttpRequest.prototype.send = function(body) {
-    if (!intercepted && this.__url && this.__url.includes('/api/station/addChart')) {
-      intercepted = true;
-
-      // Capture headers from this request
-      const origSetHeader = this.setRequestHeader;
-      const capturedHeaders = {};
-      this.setRequestHeader = function(name, value) {
-        capturedHeaders[name] = value;
-        return origSetHeader.call(this, name, value);
-      };
-
-      // Restore original prototypes immediately
-      XMLHttpRequest.prototype.open = origOpen;
-      XMLHttpRequest.prototype.send = origSend;
-
-      // Parse the original body to use as template
-      let bodyTemplate;
-      try {
-        bodyTemplate = JSON.parse(body);
-      } catch(e) {
-        bodyTemplate = {};
-      }
-
-      console.log('[BulkExport] Intercepted export request. Starting bulk download for', days.length, 'days');
-      window.__bulkExport.status = 'downloading';
-      window.__bulkExport.capturedHeaders = capturedHeaders;
-
-      // Don't send the original request — start bulk download instead
-      bulkDownload(capturedHeaders, bodyTemplate, days);
-      return;
-    }
-    return origSend.call(this, body);
-  };
-
-  async function bulkDownload(headers, bodyTemplate, days) {
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      const body = Object.assign({}, bodyTemplate, { beginTime: day });
-
-      try {
-        const resp = await fetch('/api/station/addChart', {
-          method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
-          body: JSON.stringify(body)
-        });
-
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Daily+Power+Station+Chart_${day}.xls`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        window.__bulkExport.completed++;
-        console.log(`[BulkExport] Downloaded ${day} (${window.__bulkExport.completed}/${window.__bulkExport.total})`);
-      } catch(e) {
-        window.__bulkExport.failed.push(day);
-        console.error(`[BulkExport] Failed ${day}:`, e);
-      }
-
-      // 500ms delay between requests
-      if (i < days.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
-      }
-    }
-
-    window.__bulkExport.status = 'complete';
-    console.log(`[BulkExport] Done. ${window.__bulkExport.completed} succeeded, ${window.__bulkExport.failed.length} failed.`);
-  }
-})();
-```
-
-**Important:** Replace `__TARGET_MONTH__` with the actual `TARGET_MONTH` value before injecting.
-
-### 7B. Trigger the interceptor
-
-- Click the **export/download icon** (rightmost icon in the Operating Data toolbar, after the filter icon).
-- Chrome will likely prompt "This site is trying to download multiple files" — tell the user: **"Chrome may ask permission to download multiple files. Please click 'Allow' if prompted."**
-- The interceptor will capture the auth headers from this single click and begin replaying for all days.
-
-### 8B. Wait and verify
-
-- Poll `window.__bulkExport.status` via `javascript_tool` every 5 seconds.
-- When status is `'complete'`, check `window.__bulkExport.completed` and `window.__bulkExport.failed`.
-- If there are failures, log them but continue with available data.
-- Wait a few seconds for final files to flush to disk.
-
-### 9B. Process into monthly hourly CSV
-
-Run the processing script, passing the downloads directory from step 3B:
+Read the script file and inject it via `javascript_tool`:
 
 ```bash
-python3 .claude/skills/soliscloud-export-hourly/scripts/process_month.py TARGET_MONTH DOWNLOADS_DIR
+# Read the script
+cat .claude/skills/soliscloud-export-hourly/scripts/chrome_export.js
 ```
 
-This reads all `Daily+Power+Station+Chart_YYYY-MM-DD.xls` files for the month from `DOWNLOADS_DIR` and outputs `data/solar_hourly_YYYY-MM.csv`.
+Before injecting, replace the template variables in the script content:
+- `__TARGET_MONTH__` → actual `TARGET_MONTH` value (e.g. `2026-01`)
+- `__STATION_ID__` → actual `STATION_ID` from step 4B
 
-### 10B. Display results
+Inject the modified script via `javascript_tool`. This patches `XMLHttpRequest` to capture auth headers from the next chart API request.
+
+Then click the **`<` date arrow** to trigger a `/api/chart/station/day/v2` request. This lets the interceptor capture the auth headers (Authorization, token, Content-MD5, etc.) from SolisCloud's own request.
+
+### 7B. Verify captured headers
+
+Check that headers were captured:
+
+```javascript
+JSON.stringify({ captured: !!window.__solis.capturedHeaders, keys: window.__solis.capturedHeaders ? Object.keys(window.__solis.capturedHeaders) : [] })
+```
+
+If `captured` is `false`, click the `<` arrow again and re-check. The interceptor auto-restores original XHR prototypes after the first capture.
+
+### 8B. Bulk fetch all days
+
+Trigger the bulk fetch:
+
+```javascript
+window.__solis.fetchAllDays().then(s => JSON.stringify(s))
+```
+
+This POSTs to `/api/chart/station/day/v2` for each day using the captured auth headers and returns JSON responses directly (no file downloads). Results are stored in `window.__solis.results`.
+
+Poll progress if needed:
+
+```javascript
+JSON.stringify(window.__solis.fetchStatus)
+```
+
+### 9B. Remove existing download to prevent numeric suffix
+
+Chrome appends a numeric suffix (e.g. `solar_hourly_2026-02 (1).csv`) when a file with the same name already exists in the Downloads folder. Delete any existing file before triggering the download:
+
+```bash
+rm -f ~/Downloads/solar_hourly_TARGET_MONTH.csv
+```
+
+Replace `TARGET_MONTH` with the actual value (e.g. `2026-01`).
+
+### 10B. Process and download CSV
+
+Generate the hourly CSV and trigger a browser download:
+
+```javascript
+JSON.stringify(window.__solis.generateCSV())
+```
+
+This aggregates the 5-minute JSON arrays into hourly buckets matching the output schema, then downloads `solar_hourly_TARGET_MONTH.csv` via blob URL.
+
+### 11B. Move CSV to project and display results
+
+- Move the downloaded CSV from the Downloads folder to `data/solar_hourly_TARGET_MONTH.csv`:
+
+```bash
+mkdir -p data && mv ~/Downloads/solar_hourly_TARGET_MONTH.csv data/solar_hourly_TARGET_MONTH.csv
+```
+
+Replace `TARGET_MONTH` with the actual value (e.g. `2026-01`).
 
 - Read the CSV file and display it to the user.
-- Include the summary printed by the script (total days, total readings, total generation, any missing days).
+- Include the stats returned by `generateCSV()` (total days, rows, PV generation).
 - Highlight key monthly observations (peak generation day, average daily production, battery cycling patterns).
-
-## XLS File Structure Reference (Chrome path)
-
-The exported XLS has this layout:
-- **Row 0**: Title (`Plant_YYYY-MM-DDChart`)
-- **Row 2**: Plant name and installed capacity
-- **Row 3**: Daily yield, earnings, full load hours
-- **Row 28**: Column headers: `Number, Time, Working State, PV(W), Battery(W), Grid(W), Grid Load(W), Backup Load(W), SOC(%), GEN(W), Smart(W), AC Coupled(W)`
-- **Row 29+**: Data rows at 5-minute intervals
-
-Column definitions:
-- **PV(W)**: Solar panel output power
-- **Battery(W)**: Battery power (negative = discharging, positive = charging)
-- **Grid(W)**: Grid power (negative = importing, positive = exporting)
-- **Grid Load(W)**: Power consumed by grid-connected loads
-- **Backup Load(W)**: Power consumed by backup loads
-- **SOC(%)**: Battery state of charge
-- **GEN(W)**, **Smart(W)**, **AC Coupled(W)**: Additional sources (typically zero)

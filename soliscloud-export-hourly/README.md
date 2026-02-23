@@ -8,12 +8,12 @@ Export monthly solar operating data from SolisCloud into hourly CSV files for an
 
 This skill fetches 5-minute interval data from a SolisCloud-monitored solar+battery system and aggregates it into hourly summaries. Two export methods are supported:
 
-| Method | Requirements | Speed |
-|---|---|---|
-| **API** (primary) | Environment variables with API credentials | ~15s per month |
-| **Chrome** (fallback) | `--chrome` flag, Pro subscription, browser login | ~30s per month |
+| Method | Requirements | Speed | Status |
+|---|---|---|---|
+| **API** (primary) | Environment variables with API credentials | ~15s per month | Untested — awaiting Solis API access approval |
+| **Chrome** (fallback) | `--chrome` flag, Pro/Max subscription, browser login | ~30s per month | Working |
 
-Both methods produce identical CSV output.
+Both methods produce identical CSV output. The API method does not require an Anthropic Pro/Max subscription — only a direct Anthropic API key or equivalent.
 
 ## API Setup
 
@@ -60,7 +60,6 @@ If API credentials aren't configured, the skill falls back to Chrome browser aut
 - Claude Code running with `--chrome` flag
 - Active Anthropic Pro/Max subscription (for MCP tool access)
 - Logged into SolisCloud in Chrome
-- Chrome "Ask where to save" setting **disabled** (for bulk downloads)
 
 ## Usage
 
@@ -105,4 +104,4 @@ Output file: `data/solar_hourly_YYYY-MM.csv`
 | Script | Purpose |
 |---|---|
 | `scripts/api_export.py` | API-based export (stdlib only, no pip dependencies) |
-| `scripts/process_month.py` | Process Chrome-downloaded XLS files into hourly CSV (requires `xlrd`) |
+| `scripts/chrome_export.js` | Injectable JS for Chrome fallback — bulk fetches JSON API and generates CSV in-browser |
