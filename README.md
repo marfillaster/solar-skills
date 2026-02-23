@@ -24,28 +24,20 @@ Analyzes the exported hourly CSV data and produces a detailed performance report
 
 ## Installation
 
-### Install the skills
+### Option A: Symlink into your project
 
-Add both skills to your Claude Code project configuration (`.claude/settings.json`):
+Symlink the skill directories into your project's `.claude/skills/` folder:
 
-```json
-{
-  "skills": [
-    "/path/to/solar-skills/soliscloud-export-hourly",
-    "/path/to/solar-skills/solar-analysis"
-  ]
-}
+```bash
+mkdir -p .claude/skills
+ln -s /path/to/solar-skills/soliscloud-export-hourly .claude/skills/soliscloud-export-hourly
+ln -s /path/to/solar-skills/solar-analysis .claude/skills/solar-analysis
 ```
 
-Or install them from the GitHub repo:
+### Option B: Install as a plugin
 
-```json
-{
-  "skills": [
-    "https://github.com/marfillaster/solar-skills/tree/main/soliscloud-export-hourly",
-    "https://github.com/marfillaster/solar-skills/tree/main/solar-analysis"
-  ]
-}
+```
+/plugin install https://github.com/marfillaster/solar-skills
 ```
 
 Once installed, the `/soliscloud-export-hourly` and `/solar-analysis` slash commands become available in Claude Code.
@@ -92,7 +84,7 @@ solar-skills/
     ├── README.md             # Detailed documentation
     └── scripts/
         ├── api_export.py     # API-based export (pure stdlib)
-        └── process_month.py  # XLS-to-CSV processor (requires xlrd)
+        └── chrome_export.js  # Injectable JS for Chrome fallback
 ```
 
 ## Requirements
@@ -100,7 +92,6 @@ solar-skills/
 - Python 3
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — requires a Claude Pro/Max subscription or an Anthropic API key
 - SolisCloud account with API access
-- Optional: `xlrd` (only for Chrome fallback XLS processing)
 
 ## CSV Format
 
