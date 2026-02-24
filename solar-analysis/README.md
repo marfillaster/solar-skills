@@ -91,7 +91,7 @@ Config format:
 
 ### `scripts/test_check.py`
 
-Full coverage test suite — 180 tests covering all analysis functions with synthetic data, edge cases, and integration tests against real data if present.
+Full coverage test suite — 172 tests covering all analysis functions with synthetic data, edge cases, and integration tests against real data if present.
 
 ```bash
 python3 scripts/test_check.py

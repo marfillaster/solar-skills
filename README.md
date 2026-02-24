@@ -20,7 +20,7 @@ AI-driven analysis of the exported hourly CSV data that produces a detailed perf
 - System sizing evaluation, battery health, inverter clipping detection
 - Bill impact with flat/tiered/TOU tariff support, ROI calculation
 - Anomaly detection, annual projection, carbon offset estimation
-- **180-test suite** included
+- **172-test suite** included
 
 ## Analysis Coverage
 
@@ -101,7 +101,7 @@ solar-skills/
 │   ├── README.md             # Detailed documentation
 │   └── scripts/
 │       ├── analyze.py        # Analysis engine (pure stdlib)
-│       └── test_check.py     # 180-test suite
+│       └── test_check.py     # 172-test suite
 └── soliscloud-export-hourly/
     ├── SKILL.md              # Claude Code skill definition
     ├── README.md             # Detailed documentation

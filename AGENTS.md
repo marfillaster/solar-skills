@@ -16,11 +16,11 @@ Claude Code skills for exporting and analyzing residential solar PV system data.
 python3 solar-analysis/scripts/test_check.py
 ```
 
-180 tests, runs in a few seconds. Always run after modifying `analyze.py`. No test framework — uses `unittest` from stdlib.
+172 tests, runs in a few seconds. Always run after modifying `analyze.py`. No test framework — uses `unittest` from stdlib.
 
 ## Dependencies
 
-All core scripts use **Python stdlib only**. Do not introduce external dependencies. The one exception is `xlrd`, used only by the optional Chrome fallback path in `process_month.py`.
+All core scripts use **Python stdlib only**. Do not introduce external dependencies.
 
 ## Working Directory
 
