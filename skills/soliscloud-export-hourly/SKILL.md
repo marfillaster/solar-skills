@@ -99,7 +99,7 @@ This script:
 
 ## Output Schema
 
-Both export paths produce identical CSV output. The solar-analysis skill depends on this exact schema.
+Both export paths produce identical CSV output. The analyze skill depends on this exact schema.
 
 **File:** `data/solar_hourly_YYYY-MM.csv`
 

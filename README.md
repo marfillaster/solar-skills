@@ -16,7 +16,7 @@ Exports monthly 5-minute interval data from a SolisCloud-monitored solar+battery
 - **Pure Python stdlib** — no pip dependencies for the API method
 - Outputs standardized CSV with PV, battery, grid, load, and SOC columns
 
-### `/solar-skills:solar-analysis`
+### `/solar-skills:analyze`
 
 AI-driven analysis of the exported hourly CSV data that produces a detailed performance report with actionable recommendations.
 
@@ -28,7 +28,7 @@ AI-driven analysis of the exported hourly CSV data that produces a detailed perf
 
 ## Analysis Coverage
 
-The `/solar-skills:solar-analysis` report covers the following areas, written in a consultant narrative style with quantified findings and actionable guidance:
+The `/solar-skills:analyze` report covers the following areas, written in a consultant narrative style with quantified findings and actionable guidance:
 
 | Category | What it covers |
 |---|---|
@@ -51,7 +51,7 @@ The `/solar-skills:solar-analysis` report covers the following areas, written in
 
 ## Question Flow
 
-The `/solar-skills:solar-analysis` skill asks only 9 questions. Long intake forms cause users to abandon the process or guess at values they don't actually know, which degrades analysis quality. These questions are limited to facts the homeowner knows offhand (system size, battery capacity, electricity rate) that can't be reliably inferred from meter data alone. Everything else — self-consumption rate, battery efficiency, EV detection thresholds, anomaly baselines, seasonal patterns — is computed directly from the CSV data, which is more accurate than asking the owner to estimate.
+The `/solar-skills:analyze` skill asks only 9 questions. Long intake forms cause users to abandon the process or guess at values they don't actually know, which degrades analysis quality. These questions are limited to facts the homeowner knows offhand (system size, battery capacity, electricity rate) that can't be reliably inferred from meter data alone. Everything else — self-consumption rate, battery efficiency, EV detection thresholds, anomaly baselines, seasonal patterns — is computed directly from the CSV data, which is more accurate than asking the owner to estimate.
 
 ```
 1. What city/province are you in? — infers latitude, seasonal profile, grid emission factor, currency
@@ -85,11 +85,11 @@ The `/solar-skills:solar-analysis` skill asks only 9 questions. Long intake form
 
 ```bash
 mkdir -p .claude/skills
-ln -s /path/to/solar-skills/skills/solar-analysis .claude/skills/solar-analysis
+ln -s /path/to/solar-skills/skills/analyze .claude/skills/analyze
 ln -s /path/to/solar-skills/skills/soliscloud-export-hourly .claude/skills/soliscloud-export-hourly
 ```
 
-Once installed, the `/solar-skills:soliscloud-export-hourly` and `/solar-skills:solar-analysis` slash commands become available in Claude Code.
+Once installed, the `/solar-skills:soliscloud-export-hourly` and `/solar-skills:analyze` slash commands become available in Claude Code.
 
 ## Quick Start
 
@@ -113,7 +113,7 @@ export SOLISCLOUD_INVERTER_SN="your_inverter_sn"
 ### 3. Run analysis
 
 ```
-/solar-skills:solar-analysis
+/solar-skills:analyze
 ```
 
 The analysis skill asks for system parameters interactively (PV size, battery capacity, tariff, etc.) and writes a report to `data/solar-analysis.md`.
@@ -126,7 +126,7 @@ solar-skills/
 │   ├── plugin.json           # Plugin metadata
 │   └── marketplace.json      # Marketplace manifest
 └── skills/
-    ├── solar-analysis/
+    ├── analyze/
     │   ├── SKILL.md              # Claude Code skill definition
     │   ├── README.md             # Detailed documentation
     │   └── scripts/

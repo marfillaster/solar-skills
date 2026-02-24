@@ -1,5 +1,5 @@
 ---
-name: solar-analysis
+name: analyze
 description: Use when the user asks to analyze solar data, review solar performance, get solar recommendations, check system sizing, compare EV vs non-EV days, or assess ROI on their PV system.
 version: 7.0.0
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion

@@ -7,7 +7,7 @@ Analyzes hourly solar PV system data and produces a consultant-style performance
 Invoke via Claude Code:
 
 ```
-/solar-analysis
+/solar-skills:analyze
 ```
 
 The skill reads all `data/solar_hourly_*.csv` files, asks for system parameters, runs the analysis, and writes a report to `data/solar-analysis.md`.

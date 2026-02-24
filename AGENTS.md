@@ -6,14 +6,14 @@ Claude Code skills for exporting and analyzing residential solar PV system data.
 
 ## Repository Layout
 
-- `skills/solar-analysis/` — Analysis skill (reads CSV, outputs report)
+- `skills/analyze/` — Analysis skill (reads CSV, outputs report)
 - `skills/soliscloud-export-hourly/` — Data export skill (fetches from SolisCloud API, writes CSV)
 - `data/` — Shared data directory (CSVs in, report out). Not checked into git.
 
 ## Running Tests
 
 ```bash
-python3 skills/solar-analysis/scripts/test_check.py
+python3 skills/analyze/scripts/test_check.py
 ```
 
 172 tests, runs in a few seconds. Always run after modifying `analyze.py`. No test framework — uses `unittest` from stdlib.
