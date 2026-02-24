@@ -480,6 +480,42 @@ Narrative explaining observed changes (seasonal shift, behavioral change, etc.).
 
 Narrative on expected seasonal variation appropriate to the user's climate (inferred from location).
 
+## Methodology Notes
+
+This section documents the heuristics, assumptions, and caveats used in the analysis computations. All numerical results are produced by a deterministic script; the items below describe modelling choices that affect interpretation.
+
+### Data Processing
+- Energy values assume 1-hour buckets (each row = 1 hour). Days with ≤20 of 24 hourly rows are excluded from daily statistics as partial days.
+- Self-consumed energy is calculated as `total_load - grid_import`, which measures actual solar offset and avoids inflating by battery round-trip losses. Can go slightly negative if metering errors cause import > load.
+
+### EV Detection
+- EV charging days are detected using a threshold of {threshold} kWh above the {avg_load} kWh daily average (formula: `max(8, avg_daily_load × 0.3)`). The 8 kWh floor catches PHEV charges; the 30% factor scales with household size.
+- Days near the threshold may be misclassified. The heuristic cannot distinguish EV charging from other high-load events (guests, space heaters).
+
+### Battery Analysis
+- **Usable capacity** is estimated from the deepest monotonic SOC decline per day, using only days with >30% SOC swing. BMS-reported SOC may not be linear at extremes, which could bias the estimate.
+- **Round-trip efficiency** is computed on monthly aggregates to smooth daily SOC imbalances. If SOC trends differently at month boundaries, the figure will be skewed.
+- **Avoidable import** uses a daily upper-bound estimate that overstates savings — it ignores hourly timing mismatches between surplus generation and demand.
+
+### Anomaly Detection
+- **PV anomalies**: flags days with generation <60% of the rolling 14-day mean (first 3 days excluded). Cannot distinguish equipment faults from weather — heavy cloud cover triggers false positives.
+- **Load anomalies**: flags non-EV days exceeding mean + 2 standard deviations (requires ≥5 non-EV days for baseline).
+- **Battery anomalies**: flags days with round-trip efficiency <80% where start/end SOC are within 5% and charging exceeds 1 kWh.
+
+### Financial Estimates
+- Tiered tariff calculations treat tier thresholds as cumulative. Utilities using non-cumulative block structures would require different logic.
+- Feed-in credit applies a flat rate regardless of TOU period. Time-differentiated feed-in tariffs are not modelled.
+- ROI uses 0.5%/year panel degradation (industry standard for monocrystalline silicon). Does not model inverter replacement (~10-15 years), battery degradation beyond cycle count, or electricity price inflation.
+- Battery cycle life uses a 6,000-cycle LFP rating. Actual life varies by manufacturer, depth of discharge, temperature, and charge rate. Calendar aging is not modelled.
+
+### Projections
+- Annual projection de-seasonalizes observed data using location-inferred seasonal factors, then re-applies all 12 months. Uses a fixed 30.44 days/month. With <3 months of data, confidence is low.
+- Additional panels projection scales PV output linearly — assumes same orientation, tilt, and shading as existing panels. Does not model inverter clipping from additional capacity. {If clipping was detected: "Because inverter clipping was detected, this projection is optimistic."}
+
+### Environmental
+- Carbon equivalents use fixed values: 22 kg CO₂/tree/year (mature deciduous tree, temperate climate), 0.21 kg CO₂/km (average passenger car). Actual values vary significantly by species, vehicle type, and conditions.
+- {If feedin_ratio > 0: "Feed-in tariff assumed constant; regulatory changes could affect export revenue."}
+
 ## Appendix
 
 ### Best and Worst Days
@@ -500,16 +536,6 @@ Narrative on expected seasonal variation appropriate to the user's climate (infe
 - {If EV recommendation given: "Configure EVSE charging schedule per Recommendation 1 and compare next month's EV-day import"}
 - {If overnight base load recommendation given: "Use a plug-in power meter to identify overnight loads and report findings for next analysis"}
 - Monitor battery efficiency trend — current 93–97% range is healthy; flag if any month drops below 90%
-
-### Assumptions and Limitations
-
-- Self-consumed energy is calculated as `total_load - grid_import`, which measures actual solar offset of load and avoids inflating results by battery round-trip losses
-- EV charging days are detected automatically using a threshold of {x} kWh above the {x} kWh daily average. Days near this threshold may be misclassified
-- Annual projection uses {n} months of data ({confidence} confidence). Seasonal adjustment factors are estimates based on the user's climate zone and may not reflect local microclimate
-- Panel degradation assumed at 0.5%/year (industry standard for monocrystalline silicon)
-- Battery usable capacity estimated from observed deepest discharge cycles; actual usable capacity may differ from BMS-reported values
-- Bill impact assumes consistent consumption patterns year-round; seasonal behavioral changes (e.g., air conditioning) are not modeled
-- {If feedin_ratio > 0: "Feed-in tariff assumed constant; regulatory changes could affect export revenue"}
 
 ### Disclaimer
 
