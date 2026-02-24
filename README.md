@@ -1,6 +1,6 @@
 # Solar Skills
 
-Claude Code skills for exporting and analyzing residential solar PV system data. Two skills work together to provide an end-to-end workflow: export hourly data from SolisCloud, then run a comprehensive analysis that produces a consultant-style report.
+Claude Code skills for exporting and AI-driven analysis of residential solar PV system data. Two skills work together to provide an end-to-end workflow: export hourly data from SolisCloud, then run an AI-driven analysis that produces a consultant-style report.
 
 ## Skills
 
@@ -14,7 +14,7 @@ Exports monthly 5-minute interval data from a SolisCloud-monitored solar+battery
 
 ### `/solar-analysis`
 
-Analyzes the exported hourly CSV data and produces a detailed performance report with actionable recommendations.
+AI-driven analysis of the exported hourly CSV data that produces a detailed performance report with actionable recommendations.
 
 - Monthly totals, EV day detection, hourly patterns, weekday/weekend analysis
 - System sizing evaluation, battery health, inverter clipping detection
