@@ -34,14 +34,15 @@ Use Glob to find all `data/solar_hourly_*.csv` files. If none exist, tell the us
 
 Ask the user using AskUserQuestion:
 
-1. **"Do you have an EV or PHEV?"** — Yes / No
-2. **"What is your PV system size in kWp?"** — 6.5 kWp / Other
-3. **"What is your inverter capacity in kW?"** — 5 kW / Other. This is the AC output rating printed on the inverter. If unknown, estimate as `pv_kwp / 1.3`.
-4. **"Do you have a battery?"** — Yes / No. If yes, ask: **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e. If no battery, skip battery-related analysis sections (3e, 3l, Battery Health, battery portions of anomaly detection).
-5. **"Is there room for additional panels?"** — No / Other (specify kWp)
-6. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). If tiered, ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates.
-7. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest), system age in years, import rate per kWh; infer currency from user's locale. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
-8. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
+1. **"What city/province are you in?"** — Used to infer latitude, seasonal irradiance profile, grid emission factor, and currency. No default — user must provide.
+2. **"Do you have an EV or PHEV?"** — Yes / No
+3. **"What is your PV system size in kWp?"** — No default. User must provide their system's nameplate DC capacity (e.g. 6.5 kWp, 10 kWp).
+4. **"What is your inverter capacity in kW?"** — User provides the AC output rating printed on the inverter / I don't know (estimate from PV size). If unknown, estimate as `pv_kwp / 1.3`.
+5. **"Do you have a battery?"** — Yes / No. If yes, ask: **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e. If no battery, skip battery-related analysis sections (3e, 3l, Battery Health, battery portions of anomaly detection).
+6. **"Is there room for additional panels?"** — No / Other (specify kWp)
+7. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). For all types, ask for the import rate per kWh. If tiered, also ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates.
+8. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest) and system age in years. Infer currency from the user's location (Q1). Derive the import rate from Q7. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
+9. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
 
 ### 3. Run analysis
 
@@ -53,6 +54,7 @@ Build a config JSON with these keys from the user's answers:
 
 ```json
 {
+  "location": "Manila, Philippines",
   "pv_kwp": 6.5,
   "inverter_kw": 5.0,
   "has_battery": true,
@@ -61,20 +63,21 @@ Build a config JSON with these keys from the user's answers:
   "feedin_ratio": 0.5,
   "additional_kwp": 0,
   "seasonal_factors": {"1": 1.07, ...},
-  "grid_emission_factor": 0.5,
-  "tariff": {"type": "flat", "import_rate": 0.15},
-  "roi": {"total_cost": 15000, "battery_cost": 5000, "system_age_years": 0.25},
-  "currency": "$"
+  "grid_emission_factor": 0.68,
+  "tariff": {"type": "flat", "import_rate": 14},
+  "roi": {"total_cost": 400000, "battery_cost": 100000, "system_age_years": 0.25},
+  "currency": "₱"
 }
 ```
 
 Key notes:
+- `location`: user's city/province from Q1. Used to infer `seasonal_factors`, `grid_emission_factor`, and `currency`.
 - `inverter_kw`: user-provided inverter AC capacity in kW. If unknown, use `pv_kwp / 1.3` as fallback.
 - `has_battery`: `true` if user has a battery, `false` otherwise. If `false`, set `battery_nominal_kwh` to `0` and skip battery analysis sections.
 - `battery_nominal_kwh`: if user gave voltage + Ah, compute `voltage * Ah / 1000`
-- `seasonal_factors`: infer from user's locale/climate (see 3m below for factor tables)
-- `grid_emission_factor`: infer from user's locale (see 3o below for reference values)
-- `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`
+- `seasonal_factors`: infer from user's location/climate (see 3m below for factor tables)
+- `grid_emission_factor`: infer from user's location (see 3o below for reference values)
+- `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`. `tariff.import_rate` comes from Q7.
 - For tiered: add `tariff.tiers: [{"threshold": 200, "rate": 10}, {"threshold": 400, "rate": 12}, ...]`
 - For TOU: add `tariff.tou: {"peak_hours": ["09:00", "10:00", ...], "peak_rate": 16, "offpeak_rate": 10}`
 - `roi.battery_cost`: cost of battery portion (only if `has_battery` is true); used for "without battery" ROI projection
@@ -212,7 +215,7 @@ For each month, compute:
 
 #### 3m. Annual generation projection
 
-- Infer the user's latitude and climate from their locale to determine seasonal irradiance profile and apply monthly adjustment factors relative to annual mean:
+- Infer the user's latitude and climate from their location (Q1) to determine seasonal irradiance profile and apply monthly adjustment factors relative to annual mean:
   - **Tropical (< ~23° latitude)**: relatively flat curve; wet/dry season variation ~10–15%. Adjustment: wet months ×0.93, dry months ×1.07, transitional ×1.0
   - **Temperate (23°–50°)**: significant summer/winter variation. Adjustment by month relative to annual mean: Dec/Jan ×0.55, Feb/Nov ×0.65, Mar/Oct ×0.85, Apr/Sep ×1.05, May/Aug ×1.25, Jun/Jul ×1.35 (southern hemisphere: shift by 6 months)
   - **High latitude (> 50°)**: extreme seasonal variation. Adjustment: Dec/Jan ×0.25, Feb/Nov ×0.45, Mar/Oct ×0.75, Apr/Sep ×1.10, May/Aug ×1.45, Jun/Jul ×1.55 (southern hemisphere: shift by 6 months)
@@ -230,7 +233,7 @@ For each month, compute:
 
 #### 3o. Carbon offset estimate
 
-- Infer the grid emission factor from the user's locale (e.g., ~0.39 for US, ~0.23 for EU, ~0.61 for Australia, ~0.68 for Philippines — look up the appropriate value)
+- Infer the grid emission factor from the user's location (Q1) (e.g., ~0.39 for US, ~0.23 for EU, ~0.61 for Australia, ~0.68 for Philippines — look up the appropriate value)
 - `annual_co2_avoided = projected_annual_self_consumed * grid_emission_factor` (in kg, convert to tonnes)
 - Express as equivalent: trees planted (~22 kg CO₂/tree/year), km driven (~0.21 kg CO₂/km for average car)
 
@@ -475,7 +478,7 @@ Narrative explaining observed changes (seasonal shift, behavioral change, etc.).
 - Projected annual grid export: ~{x} kWh
 - Environmental impact: ~{x} tonnes CO₂ avoided annually (at {grid_emission_factor} kg CO₂/kWh), equivalent to ~{x} trees planted
 
-Narrative on expected seasonal variation appropriate to the user's climate (inferred from locale).
+Narrative on expected seasonal variation appropriate to the user's climate (inferred from location).
 
 ## Appendix
 
