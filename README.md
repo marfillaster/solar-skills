@@ -45,6 +45,27 @@ The `/solar-analysis` report covers the following areas, written in a consultant
 | **Best / Worst Days** | Highest and lowest self-sufficiency days with full metrics and causal explanation |
 | **Recommendations** | Prioritized, multi-paragraph actions (EV charge timing, base load reduction, appliance scheduling, SOC floor, battery sizing, TOU arbitrage) with quantified savings |
 
+## Question Flow
+
+The `/solar-analysis` skill asks these questions interactively before running:
+
+1. **What city/province are you in?** — infers latitude, seasonal profile, grid emission factor, currency
+2. **Do you have an EV or PHEV?** — Yes / No
+3. **What is your PV system size in kWp?**
+4. **What is your inverter capacity in kW?** — value or "I don't know" (estimates as PV ÷ 1.3)
+5. **Do you have a battery?** — Yes / No
+   ├─ Yes → **What is your battery capacity?** — kWh or Voltage × Ah
+   └─ No → battery sections skipped
+6. **Is there room for additional panels?** — No / specify kWp
+7. **What is your tariff structure?**
+   ├─ Flat → import rate
+   ├─ Tiered → import rate + tier thresholds/rates
+   └─ TOU → import rate + peak/off-peak hours/rates
+8. **Do you want an ROI estimate?** — No / Yes
+   └─ Yes → total cost, system age
+        └─ if battery → **battery cost** (for with-vs-without comparison)
+9. **What is your feed-in tariff arrangement?** — none / ~50% of import / specify ratio
+
 ## Installation
 
 ### Option A: Symlink into your project
