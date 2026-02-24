@@ -1,0 +1,11 @@
+{
+  "name": "solar-skills",
+  "description": "Claude Code skills for exporting and AI-driven analysis of residential solar PV system data",
+  "version": "1.0.0",
+  "author": {
+    "name": "marfillaster"
+  },
+  "homepage": "https://github.com/marfillaster/solar-skills",
+  "repository": "https://github.com/marfillaster/solar-skills",
+  "license": "MIT"
+}

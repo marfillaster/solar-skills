@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "solar-skills",
+  "owner": {
+    "name": "marfillaster"
+  },
+  "plugins": [
+    {
+      "name": "solar-skills",
+      "source": ".",
+      "description": "Claude Code skills for exporting and AI-driven analysis of residential solar PV system data"
+    }
+  ]
+}

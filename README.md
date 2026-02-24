@@ -70,20 +70,19 @@ The `/solar-analysis` skill asks only 9 questions. Long intake forms cause users
 
 ## Installation
 
-### Option A: Symlink into your project
+### Option A: Install as a plugin (recommended)
 
-Symlink the skill directories into your project's `.claude/skills/` folder:
+```
+/plugin marketplace add marfillaster/solar-skills
+/plugin install solar-skills@marfillaster-solar-skills
+```
+
+### Option B: Symlink into your project
 
 ```bash
 mkdir -p .claude/skills
-ln -s /path/to/solar-skills/soliscloud-export-hourly .claude/skills/soliscloud-export-hourly
-ln -s /path/to/solar-skills/solar-analysis .claude/skills/solar-analysis
-```
-
-### Option B: Install as a plugin
-
-```
-/plugin install https://github.com/marfillaster/solar-skills
+ln -s /path/to/solar-skills/skills/solar-analysis .claude/skills/solar-analysis
+ln -s /path/to/solar-skills/skills/soliscloud-export-hourly .claude/skills/soliscloud-export-hourly
 ```
 
 Once installed, the `/soliscloud-export-hourly` and `/solar-analysis` slash commands become available in Claude Code.
@@ -119,18 +118,22 @@ The analysis skill asks for system parameters interactively (PV size, battery ca
 
 ```
 solar-skills/
-├── solar-analysis/
-│   ├── SKILL.md              # Claude Code skill definition
-│   ├── README.md             # Detailed documentation
-│   └── scripts/
-│       ├── analyze.py        # Analysis engine (pure stdlib)
-│       └── test_check.py     # 172-test suite
-└── soliscloud-export-hourly/
-    ├── SKILL.md              # Claude Code skill definition
-    ├── README.md             # Detailed documentation
-    └── scripts/
-        ├── api_export.py     # API-based export (pure stdlib)
-        └── chrome_export.js  # Injectable JS for Chrome fallback
+├── .claude-plugin/
+│   ├── plugin.json           # Plugin metadata
+│   └── marketplace.json      # Marketplace manifest
+└── skills/
+    ├── solar-analysis/
+    │   ├── SKILL.md              # Claude Code skill definition
+    │   ├── README.md             # Detailed documentation
+    │   └── scripts/
+    │       ├── analyze.py        # Analysis engine (pure stdlib)
+    │       └── test_check.py     # 172-test suite
+    └── soliscloud-export-hourly/
+        ├── SKILL.md              # Claude Code skill definition
+        ├── README.md             # Detailed documentation
+        └── scripts/
+            ├── api_export.py     # API-based export (pure stdlib)
+            └── chrome_export.js  # Injectable JS for Chrome fallback
 ```
 
 ## Requirements
