@@ -22,6 +22,29 @@ Analyzes the exported hourly CSV data and produces a detailed performance report
 - Anomaly detection, annual projection, carbon offset estimation
 - **180-test suite** included
 
+## Analysis Coverage
+
+The `/solar-analysis` report covers the following areas, written in a consultant narrative style with quantified findings and actionable guidance:
+
+| Category | What it covers |
+|---|---|
+| **Monthly Totals** | PV generation, consumption, grid import/export, battery throughput, self-consumption and self-sufficiency rates |
+| **EV Day Detection** | Adaptive threshold detection of EV/PHEV charging days; splits all subsequent analysis into EV vs non-EV patterns |
+| **Hourly Profiles** | Average PV, battery, grid, load, and SOC by hour; identifies peak generation, peak load, export windows, and battery taper timing |
+| **Weekday vs Weekend** | Load shape comparison, self-sufficiency differences, occupancy-driven optimization opportunities |
+| **System Sizing** | PV capacity factor, inverter clipping detection, DC/AC ratio, PV-to-load ratio, sizing verdict (undersized / correct / oversized) |
+| **Battery Health** | Usable vs nominal capacity, round-trip efficiency, daily cycle depth, annual cycle projection, remaining cycle life estimate |
+| **Additional Panels** | Hour-by-hour simulation of extra PV capacity, marginal self-consumption vs export split, inverter headroom check |
+| **Peak Demand** | Peak grid draw and PV output with timestamps, EV vs non-EV day comparison |
+| **Anomaly Detection** | PV shortfalls vs rolling baseline, unusual load spikes, battery efficiency outliers |
+| **Bill Impact** | Flat, tiered, or TOU tariff modelling; monthly cost table; with-vs-without-solar comparison; feed-in credits |
+| **ROI Estimation** | Payback period with 0.5%/yr panel degradation, 25-year lifetime savings, with-vs-without-battery comparison |
+| **Month-over-Month Trends** | PV, load, self-sufficiency, and battery efficiency trends across months; flags significant shifts |
+| **Annual Projection** | Latitude-based seasonal adjustment, de-seasonalized baseline, generation forecast at years 1/10/25 |
+| **Carbon Offset** | Locale-based grid emission factor, annual CO₂ avoided, tree and driving equivalents |
+| **Best / Worst Days** | Highest and lowest self-sufficiency days with full metrics and causal explanation |
+| **Recommendations** | Prioritized, multi-paragraph actions (EV charge timing, base load reduction, appliance scheduling, SOC floor, battery sizing, TOU arbitrage) with quantified savings |
+
 ## Installation
 
 ### Option A: Symlink into your project

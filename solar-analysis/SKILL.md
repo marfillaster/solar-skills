@@ -37,10 +37,10 @@ Ask the user using AskUserQuestion:
 1. **"Do you have an EV or PHEV?"** — Yes / No
 2. **"What is your PV system size in kWp?"** — 6.5 kWp / Other
 3. **"What is your inverter capacity in kW?"** — 5 kW / Other. This is the AC output rating printed on the inverter. If unknown, estimate as `pv_kwp / 1.3`.
-4. **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e.
+4. **"Do you have a battery?"** — Yes / No. If yes, ask: **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e. If no battery, skip battery-related analysis sections (3e, 3l, Battery Health, battery portions of anomaly detection).
 5. **"Is there room for additional panels?"** — No / Other (specify kWp)
 6. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). If tiered, ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates.
-7. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost, system age in years, import rate per kWh; infer currency from user's locale)
+7. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest), system age in years, import rate per kWh; infer currency from user's locale. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
 8. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
 
 ### 3. Run analysis
@@ -55,6 +55,7 @@ Build a config JSON with these keys from the user's answers:
 {
   "pv_kwp": 6.5,
   "inverter_kw": 5.0,
+  "has_battery": true,
   "battery_nominal_kwh": 14.336,
   "has_ev": true,
   "feedin_ratio": 0.5,
@@ -62,19 +63,21 @@ Build a config JSON with these keys from the user's answers:
   "seasonal_factors": {"1": 1.07, ...},
   "grid_emission_factor": 0.5,
   "tariff": {"type": "flat", "import_rate": 0.15},
-  "roi": {"total_cost": 15000, "system_age_years": 0.25},
+  "roi": {"total_cost": 15000, "battery_cost": 5000, "system_age_years": 0.25},
   "currency": "$"
 }
 ```
 
 Key notes:
 - `inverter_kw`: user-provided inverter AC capacity in kW. If unknown, use `pv_kwp / 1.3` as fallback.
+- `has_battery`: `true` if user has a battery, `false` otherwise. If `false`, set `battery_nominal_kwh` to `0` and skip battery analysis sections.
 - `battery_nominal_kwh`: if user gave voltage + Ah, compute `voltage * Ah / 1000`
 - `seasonal_factors`: infer from user's locale/climate (see 3m below for factor tables)
 - `grid_emission_factor`: infer from user's locale (see 3o below for reference values)
 - `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`
 - For tiered: add `tariff.tiers: [{"threshold": 200, "rate": 10}, {"threshold": 400, "rate": 12}, ...]`
 - For TOU: add `tariff.tou: {"peak_hours": ["09:00", "10:00", ...], "peak_rate": 16, "offpeak_rate": 10}`
+- `roi.battery_cost`: cost of battery portion (only if `has_battery` is true); used for "without battery" ROI projection
 - `roi`: set to `null` if user declined ROI estimate
 
 Write the config to `data/analysis_config.json`, then run:
@@ -189,6 +192,7 @@ For each month, compute:
 - `simple_payback` = year where cumulative savings exceeds total cost (accounting for degradation)
 - `remaining_payback = max(0, simple_payback - system_age_years)`
 - Report 25-year lifetime savings (with degradation) alongside simple payback
+- **Without-battery projection** (if `has_battery` is true): compute a parallel ROI using `total_cost - battery_cost` as the investment. For savings, remove battery's contribution: assume all solar energy not consumed in real-time is exported (no evening/night self-consumption from battery), so `no_battery_savings = direct_solar_self_consumed * import_rate + (exported + battery_discharged_to_load) * import_rate * feedin_ratio`. Where `direct_solar_self_consumed` = hours where PV > 0: `min(pv, load)` summed. Compare payback periods side-by-side to show the battery's incremental ROI.
 - Use detected currency for all monetary values
 
 #### 3k. Month-over-month trends (if ≥2 months of data)
@@ -346,15 +350,19 @@ Similar multi-paragraph structure with data-backed reasoning.
 
 (Only if user requested. Placed immediately after Bill Impact for financial flow.)
 
-| Metric | Value |
-|---|---|
-| Total system cost | {currency}{amount} |
-| Estimated daily savings | {currency}{amount} |
-| Estimated annual savings (year 1) | {currency}{amount} |
-| **Simple payback** | **{x} years** (with 0.5%/year degradation) |
-| System age | {x} years |
-| Remaining payback | {x} years |
-| 25-year lifetime savings | {currency}{amount} |
+| Metric | With Battery | Without Battery |
+|---|---|---|
+| System cost | {currency}{total_cost} | {currency}{total_cost - battery_cost} |
+| Estimated annual savings (year 1) | {currency}{amount} | {currency}{amount} |
+| **Simple payback** | **{x} years** | **{x} years** |
+| Remaining payback | {x} years | {x} years |
+| 25-year lifetime savings | {currency}{amount} | {currency}{amount} |
+
+(If no battery, use a single-column table with just the system values — no "Without Battery" column.)
+
+**Battery incremental ROI**: The battery cost {currency}{battery_cost} adds {currency}{battery_annual_benefit}/year in avoided import (energy shifted from export at feed-in rate to self-consumption at import rate). Battery-only payback: ~{x} years. {Narrative: whether the battery investment is justified given cycle life, or whether the panels alone carry most of the ROI.}
+
+Note: "Total system cost" is the user-reported figure, which may include financing costs (e.g., loan interest) beyond hardware and installation. If the user indicated financing, note this in the narrative — e.g., "System cost includes financing; hardware-only cost would yield a shorter payback."
 
 Narrative: payback context relative to panel lifespan (25+ years) and battery lifespan (from cycle life estimate). Note that degradation-adjusted payback is slightly longer than a naive calculation. If recommendations are implemented, estimated improved payback.
 
