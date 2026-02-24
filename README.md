@@ -47,7 +47,7 @@ The `/solar-analysis` report covers the following areas, written in a consultant
 
 ## Question Flow
 
-The `/solar-analysis` skill asks these questions interactively before running:
+The `/solar-analysis` skill asks only 9 questions. Long intake forms cause users to abandon the process or guess at values they don't actually know, which degrades analysis quality. These questions are limited to facts the homeowner knows offhand (system size, battery capacity, electricity rate) that can't be reliably inferred from meter data alone. Everything else — self-consumption rate, battery efficiency, EV detection thresholds, anomaly baselines, seasonal patterns — is computed directly from the CSV data, which is more accurate than asking the owner to estimate.
 
 ```
 1. What city/province are you in? — infers latitude, seasonal profile, grid emission factor, currency
