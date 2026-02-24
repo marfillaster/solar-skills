@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "solar-skills",
-      "source": "./plugin",
+      "source": "./",
       "description": "Claude Code skills for exporting and AI-driven analysis of residential solar PV system data"
     }
   ]
