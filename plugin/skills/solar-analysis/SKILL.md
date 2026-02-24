@@ -86,7 +86,7 @@ Key notes:
 Write the config to `data/analysis_config.json`, then run:
 
 ```bash
-python3 .claude/skills/solar-analysis/scripts/analyze.py data/analysis_config.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/solar-analysis/scripts/analyze.py data/analysis_config.json
 ```
 
 The script outputs JSON to stdout with all computed metrics. Capture this output and use it to write the report in step 4.

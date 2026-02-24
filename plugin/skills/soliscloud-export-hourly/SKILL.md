@@ -80,7 +80,7 @@ export SOLISCLOUD_INVERTER_SN="your_inverter_sn"
 ### 3A. Run API export
 
 ```bash
-python3 .claude/skills/soliscloud-export-hourly/scripts/api_export.py TARGET_MONTH
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/soliscloud-export-hourly/scripts/api_export.py TARGET_MONTH
 ```
 
 This script:
@@ -151,7 +151,7 @@ Read the script file and inject it via `javascript_tool`:
 
 ```bash
 # Read the script
-cat .claude/skills/soliscloud-export-hourly/scripts/chrome_export.js
+cat ${CLAUDE_PLUGIN_ROOT}/skills/soliscloud-export-hourly/scripts/chrome_export.js
 ```
 
 Before injecting, replace the template variables in the script content:

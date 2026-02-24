@@ -6,14 +6,14 @@ Claude Code skills for exporting and analyzing residential solar PV system data.
 
 ## Repository Layout
 
-- `skills/solar-analysis/` — Analysis skill (reads CSV, outputs report)
-- `skills/soliscloud-export-hourly/` — Data export skill (fetches from SolisCloud API, writes CSV)
+- `plugin/skills/solar-analysis/` — Analysis skill (reads CSV, outputs report)
+- `plugin/skills/soliscloud-export-hourly/` — Data export skill (fetches from SolisCloud API, writes CSV)
 - `data/` — Shared data directory (CSVs in, report out). Not checked into git.
 
 ## Running Tests
 
 ```bash
-python3 skills/solar-analysis/scripts/test_check.py
+python3 plugin/skills/solar-analysis/scripts/test_check.py
 ```
 
 172 tests, runs in a few seconds. Always run after modifying `analyze.py`. No test framework — uses `unittest` from stdlib.
@@ -28,7 +28,7 @@ All scripts assume they are run from the **project root** (the directory contain
 
 ## CSV Contract
 
-Both skills must produce/consume the same 16-column CSV format. The canonical column list and sign conventions are defined in `skills/soliscloud-export-hourly/README.md` under "Output Format".
+Both skills must produce/consume the same 16-column CSV format. The canonical column list and sign conventions are defined in `plugin/skills/soliscloud-export-hourly/README.md` under "Output Format".
 
 ### Sign Conventions (critical)
 

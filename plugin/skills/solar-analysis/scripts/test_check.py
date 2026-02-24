@@ -3,7 +3,7 @@
 Full coverage test suite for analyze.py.
 
 Run from the project root:
-    python3 .claude/skills/solar-analysis/scripts/test_check.py
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/solar-analysis/scripts/test_check.py
 
 Tests all analysis functions with synthetic data and optionally validates
 against real CSV data if present in data/.
