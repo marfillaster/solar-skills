@@ -64,7 +64,7 @@ If API credentials aren't configured, the skill falls back to Chrome browser aut
 ## Usage
 
 ```
-/soliscloud-export-hourly YYYY-MM
+/export-hourly-soliscloud YYYY-MM
 ```
 
 If no month is specified, uses the current month.

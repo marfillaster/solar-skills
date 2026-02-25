@@ -7,7 +7,7 @@ Claude Code skills for exporting and analyzing residential solar PV system data.
 ## Repository Layout
 
 - `skills/analyze/` — Analysis skill (reads CSV, outputs report)
-- `skills/soliscloud-export-hourly/` — Data export skill (fetches from SolisCloud API, writes CSV)
+- `skills/export-hourly-soliscloud/` — Data export skill (fetches from SolisCloud API, writes CSV)
 - `data/` — Shared data directory (CSVs in, report out). Not checked into git.
 
 ## Running Tests
@@ -28,7 +28,7 @@ All scripts assume they are run from the **project root** (the directory contain
 
 ## CSV Contract
 
-Both skills must produce/consume the same 16-column CSV format. The canonical column list and sign conventions are defined in `skills/soliscloud-export-hourly/README.md` under "Output Format".
+Both skills must produce/consume the same 16-column CSV format. The canonical column list and sign conventions are defined in `skills/export-hourly-soliscloud/README.md` under "Output Format".
 
 ### Sign Conventions (critical)
 

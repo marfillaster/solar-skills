@@ -1,5 +1,5 @@
 ---
-name: soliscloud-export-hourly
+name: export-hourly-soliscloud
 description: Use when the user asks to export SolisCloud solar data, download solar metrics, get power station data, create hourly solar summary, or mentions SolisCloud export/download. Supports monthly bulk export.
 version: 4.0.0
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool
@@ -41,7 +41,7 @@ echo "${SOLISCLOUD_API_KEY:-NOT_SET}"
   1. **Set up API access** — I'll guide you through getting API credentials (recommended, no browser needed)
   2. **Use Chrome fallback** — Export via browser automation (requires `--chrome` flag)
 
-  - If **Set up API access**: follow the API setup guidance below, then tell the user to re-run `/soliscloud-export-hourly` after setting env vars.
+  - If **Set up API access**: follow the API setup guidance below, then tell the user to re-run `/export-hourly-soliscloud` after setting env vars.
   - If **Chrome fallback**: proceed to **Step 3B**.
 
 #### API setup guidance
@@ -71,7 +71,7 @@ export SOLISCLOUD_STATION_ID="your_station_id"
 export SOLISCLOUD_INVERTER_SN="your_inverter_sn"
 ```
 
-11. Re-run `/soliscloud-export-hourly YYYY-MM`
+11. Re-run `/export-hourly-soliscloud YYYY-MM`
 
 ---
 

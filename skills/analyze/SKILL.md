@@ -28,7 +28,7 @@ Sign conventions:
 
 ### 1. Find CSV data files
 
-Use Glob to find all `data/solar_hourly_*.csv` files. If none exist, tell the user to export their solar data first (e.g., `/soliscloud-export-hourly YYYY-MM` for SolisCloud users).
+Use Glob to find all `data/solar_hourly_*.csv` files. If none exist, tell the user to export their solar data first (e.g., `/export-hourly-soliscloud YYYY-MM` for SolisCloud users, or `/export-hourly-deye YYYY-MM` for Deye/Solarman users).
 
 ### 2. Gather user parameters
 
