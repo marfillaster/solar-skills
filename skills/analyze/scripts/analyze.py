@@ -112,6 +112,14 @@ def row_hour(r):
 
 # Derived fields per row
 def enrich(r):
+    """Compute derived fields from raw CSV columns.
+
+    Note:
+        Assumption: Energy values use 1-hour buckets, so *_Energy_kWh numerically
+        equals Avg_*_W / 1000. Sign conventions: battery positive = charge,
+        grid positive = export. These must match the CSV contract from the
+        inverter/monitoring system.
+    """
     r["Load_kWh"] = r["GridLoad_Energy_kWh"] + r["BackupLoad_Energy_kWh"]
     r["Load_W"] = r["Avg_GridLoad_W"] + r["Avg_BackupLoad_W"]
     r["Grid_Import_kWh"] = abs(min(0, r["Grid_Energy_kWh"]))
@@ -126,7 +134,13 @@ def enrich(r):
 # ---------------------------------------------------------------------------
 
 def compute_monthly_totals(rows):
-    """3a. Monthly totals."""
+    """3a. Monthly totals.
+
+    Note:
+        Assumption: self_consumed = total_load - grid_import. This measures actual
+        solar offset and avoids inflating by battery round-trip losses, but can go
+        negative if metering errors cause import > load.
+    """
     by_month = group_by(rows, row_month)
     result = {}
     for m, mrows in sorted(by_month.items()):
@@ -136,7 +150,7 @@ def compute_monthly_totals(rows):
         grid_import = sum(r["Grid_Import_kWh"] for r in mrows)
         battery_charge = sum(r["Battery_Charge_kWh"] for r in mrows)
         battery_discharge = sum(r["Battery_Discharge_kWh"] for r in mrows)
-        self_consumed = total_load - grid_import
+        self_consumed = total_load - grid_import  # ASSUMPTION: see docstring
         sc_rate = (self_consumed / total_pv * 100) if total_pv > 0 else 0
         ss = (1 - grid_import / total_load) * 100 if total_load > 0 else None
         days = len(set(row_day(r) for r in mrows))
@@ -157,18 +171,30 @@ def compute_monthly_totals(rows):
 
 
 def detect_ev_days(rows):
-    """3b. EV day detection."""
+    """3b. EV day detection.
+
+    Note:
+        Heuristic: Days with ≤20 of 24 hourly rows are excluded to avoid skewing
+        averages with incomplete data.
+
+        Heuristic: Threshold is max(8, avg_daily_load * 0.3) kWh above mean daily
+        load. The 8 kWh floor catches small PHEV charges; the 30% factor scales
+        with household size. Days near the threshold may be misclassified.
+
+        Caveat: Does not distinguish EV charging from other high-load events
+        (e.g., guests, space heaters).
+    """
     by_day = group_by(rows, row_day)
     daily_loads = {}
     for day, drows in by_day.items():
-        if len(drows) > 20:
+        if len(drows) > 20:  # HEURISTIC: exclude partial days (≤20 of 24 rows)
             daily_loads[day] = sum(r["Load_kWh"] for r in drows)
 
     if not daily_loads:
         return set(), set(), {}
 
     avg_load = mean(list(daily_loads.values()))
-    threshold = max(8, avg_load * 0.3)
+    threshold = max(8, avg_load * 0.3)  # HEURISTIC: 8 kWh floor, 30% scaling
 
     ev_days = set()
     non_ev_days = set()
@@ -282,7 +308,7 @@ def compute_weekday_weekend(rows, non_ev_days):
 
     result = {}
     for label, day_set in [("weekday", weekday_days), ("weekend", weekend_days)]:
-        days_data = {d: drows for d, drows in by_day.items() if d in day_set and len(drows) > 20}
+        days_data = {d: drows for d, drows in by_day.items() if d in day_set and len(drows) > 20}  # HEURISTIC: exclude partial days
         if not days_data:
             continue
         daily_loads = [sum(r["Load_kWh"] for r in drows) for drows in days_data.values()]
@@ -385,7 +411,30 @@ def compute_system_sizing(rows, pv_kwp, inverter_kw, non_ev_days, ev_days):
 
 
 def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
-    """3e. Battery analysis."""
+    """3e. Battery analysis.
+
+    Note:
+        Heuristic (usable capacity): Estimates usable capacity by finding the
+        deepest monotonic SOC decline per day, computing
+        discharge_kWh / (SOC_drop / 100), and taking the median across days with
+        >30% SOC swing.
+
+        Caveat (usable capacity): Accuracy depends on the inverter's SOC and
+        energy reporting. BMS-reported SOC may not be linear (especially at
+        extremes). The >30% swing filter excludes shallow cycles which could bias
+        the estimate upward.
+
+        Assumption (monthly efficiency): Computed on monthly aggregates
+        (total_discharge / total_charge) to smooth out daily SOC imbalances.
+        Assumes SOC roughly balances over a month. If the battery trends toward a
+        different SOC at month-end vs month-start, the efficiency figure will be
+        skewed.
+
+        Caveat (avoidable import): Uses daily upper-bound:
+        daily_import - max(0, load - pv). This overstates avoidable import because
+        it ignores hourly timing mismatches — a battery can't simultaneously store
+        afternoon surplus and discharge during morning demand.
+    """
     by_day = group_by(rows, row_day)
 
     # Usable capacity estimation via deepest monotonic SOC decline
@@ -412,7 +461,7 @@ def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
             else:
                 i += 1
 
-        if best_drop > 30:
+        if best_drop > 30:  # HEURISTIC: require >30% SOC swing for reliable estimate
             discharge_in_window = sum(discharge_vals[best_start : best_end + 1])
             if best_drop > 0 and discharge_in_window > 0:
                 est = discharge_in_window / (best_drop / 100)
@@ -453,7 +502,7 @@ def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
                 "avg_cycle_depth": round(mean([v["cycle_depth"] for v in subset.values()]), 0),
             }
 
-    # Monthly round-trip efficiency
+    # Monthly round-trip efficiency — ASSUMPTION: see docstring
     by_month = group_by(rows, row_month)
     monthly_efficiency = {}
     for m, mrows in sorted(by_month.items()):
@@ -466,7 +515,7 @@ def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
             "discharge": round(dis, 1),
         }
 
-    # Avoidable import (daily upper-bound fallback)
+    # Avoidable import (daily upper-bound) — CAVEAT: see docstring
     avoidable_total = 0
     for day, drows in by_day.items():
         day_import = sum(r["Grid_Import_kWh"] for r in drows)
@@ -496,7 +545,16 @@ def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
 
 
 def compute_additional_panels(rows, current_kwp, additional_kwp, feedin_ratio, import_rate):
-    """3f. Additional panels projection."""
+    """3f. Additional panels projection.
+
+    Note:
+        Assumption: Scales PV output linearly — assumes additional panels have the
+        same orientation, tilt, and shading as existing panels. Does not model
+        inverter clipping from the additional capacity.
+
+        Caveat: If inverter clipping was detected in system sizing, this projection
+        is optimistic.
+    """
     if additional_kwp <= 0:
         return None
 
@@ -580,7 +638,21 @@ def compute_peak_demand(rows, ev_days, non_ev_days, inverter_ac_w):
 
 
 def compute_anomalies(rows, ev_days, non_ev_days):
-    """3h. Anomaly detection."""
+    """3h. Anomaly detection.
+
+    Note:
+        Heuristic (PV): Flags days where PV generation is <60% of the rolling
+        14-day mean. The first 3 days are excluded (insufficient baseline).
+        Caveat: Cannot distinguish equipment faults from weather events. Heavy
+        cloud cover will trigger false positives.
+
+        Heuristic (load): Flags non-EV days where load exceeds mean + 2 standard
+        deviations. Requires ≥5 non-EV days for a meaningful baseline.
+
+        Heuristic (battery): Flags days where round-trip efficiency < 80%, but
+        only for days where start and end SOC are within 5% (to ensure a roughly
+        complete cycle). Requires >1 kWh of charging to avoid noise from idle days.
+    """
     by_day = group_by(rows, row_day)
     sorted_days = sorted(by_day.keys())
 
@@ -594,7 +666,7 @@ def compute_anomalies(rows, ev_days, non_ev_days):
         window_start = max(0, i - 14)
         window_days = sorted_days[window_start:i]
         ref_mean = mean([daily_pv[d] for d in window_days])
-        if ref_mean > 0 and daily_pv[day] < ref_mean * 0.6:
+        if ref_mean > 0 and daily_pv[day] < ref_mean * 0.6:  # HEURISTIC: <60% of rolling mean
             pv_anomalies.append({
                 "date": day,
                 "daily_pv": round(daily_pv[day], 1),
@@ -609,10 +681,10 @@ def compute_anomalies(rows, ev_days, non_ev_days):
         if d in by_day and len(by_day[d]) > 20
     ]
     load_anomalies = []
-    if len(non_ev_loads) >= 5:
+    if len(non_ev_loads) >= 5:  # HEURISTIC: require ≥5 days for meaningful baseline
         load_mean = mean(non_ev_loads)
         load_std = stdev(non_ev_loads)
-        threshold = load_mean + 2 * load_std
+        threshold = load_mean + 2 * load_std  # HEURISTIC: mean + 2σ
         for d in non_ev_days:
             if d in by_day and len(by_day[d]) > 20:
                 day_load = sum(r["Load_kWh"] for r in by_day[d])
@@ -632,13 +704,13 @@ def compute_anomalies(rows, ev_days, non_ev_days):
             continue
         start_soc = drows_sorted[0]["Avg_SOC_Pct"]
         end_soc = drows_sorted[-1]["Avg_SOC_Pct"]
-        if abs(start_soc - end_soc) > 5:
+        if abs(start_soc - end_soc) > 5:  # HEURISTIC: require SOC within 5% for complete cycle
             continue
         ch = sum(r["Battery_Charge_kWh"] for r in drows_sorted)
         dis = sum(r["Battery_Discharge_kWh"] for r in drows_sorted)
-        if ch > 1:  # meaningful cycling
+        if ch > 1:  # HEURISTIC: >1 kWh charging to avoid noise from idle days
             eff = dis / ch * 100
-            if eff < 80:
+            if eff < 80:  # HEURISTIC: flag efficiency below 80%
                 battery_anomalies.append({
                     "date": day,
                     "efficiency": round(eff, 1),
@@ -654,7 +726,18 @@ def compute_anomalies(rows, ev_days, non_ev_days):
 
 
 def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
-    """3i. Bill impact estimate."""
+    """3i. Bill impact estimate.
+
+    Note:
+        Assumption (tiered tariff): Treats tier thresholds as cumulative (each tier
+        covers threshold[i] - threshold[i-1] kWh). Some utilities use
+        non-cumulative block structures which would require different logic.
+
+        Caveat (feed-in credit): Applies a flat feed-in rate
+        (import_rate * feedin_ratio) regardless of TOU period. Utilities with
+        time-differentiated feed-in tariffs will see inaccurate export revenue
+        estimates.
+    """
     tariff_type = tariff.get("type", "flat")
     import_rate = tariff.get("import_rate", 0)
 
@@ -714,7 +797,7 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
             without_solar = calc_fn(total_load)
             with_solar = calc_fn(grid_import)
 
-        feedin_credit = grid_export * import_rate * feedin_ratio
+        feedin_credit = grid_export * import_rate * feedin_ratio  # CAVEAT: flat rate, ignores TOU
         net_savings = without_solar - with_solar + feedin_credit
 
         days = monthly_totals[m]["days"] if m in monthly_totals else 30
@@ -772,7 +855,14 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
 
 
 def compute_roi(bill_impact, roi_config, annual_savings_override=None):
-    """3j. ROI estimate with panel degradation."""
+    """3j. ROI estimate with panel degradation.
+
+    Note:
+        Assumption: Panel degradation at 0.5%/year (industry standard for
+        monocrystalline silicon). Does not model inverter replacement (~10-15
+        years), battery degradation beyond cycle count, or electricity price
+        inflation.
+    """
     if not roi_config:
         return None
 
@@ -783,7 +873,7 @@ def compute_roi(bill_impact, roi_config, annual_savings_override=None):
     if annual_savings <= 0:
         return {"error": "No savings to compute ROI"}
 
-    # Find payback year with 0.5%/year degradation
+    # Find payback year with 0.5%/year degradation — ASSUMPTION: see docstring
     cumulative = 0
     payback_year = None
     yearly_savings = []
@@ -861,13 +951,19 @@ def compute_trends(monthly_totals, monthly_efficiency):
 
 
 def compute_battery_health(battery_analysis, system_age_years):
-    """3l. Battery health indicators."""
+    """3l. Battery health indicators.
+
+    Note:
+        Assumption: Uses 6,000-cycle rating (typical LFP). Actual cycle life
+        varies by manufacturer, depth of discharge, temperature, and charge rate.
+        Does not account for calendar aging.
+    """
     usable = battery_analysis["estimated_usable_kwh"]
     avg_discharge = battery_analysis["avg_discharge"]
     daily_cycles = avg_discharge / usable if usable > 0 else 0
     annual_cycles = daily_cycles * 365
     cycles_used = annual_cycles * system_age_years
-    remaining_cycles = max(0, 6000 - cycles_used)
+    remaining_cycles = max(0, 6000 - cycles_used)  # ASSUMPTION: 6000-cycle LFP rating
     remaining_years = remaining_cycles / annual_cycles if annual_cycles > 0 else float("inf")
 
     return {
@@ -883,7 +979,18 @@ def compute_battery_health(battery_analysis, system_age_years):
 
 
 def compute_annual_projection(monthly_totals, seasonal_factors, monthly_efficiency, sc_rate):
-    """3m. Annual generation projection."""
+    """3m. Annual generation projection.
+
+    Note:
+        Assumption: De-seasonalizes by dividing out monthly seasonal factors, then
+        re-applies all 12 to project. Accuracy depends entirely on the seasonal
+        factors provided in the config (which are AI-inferred from the user's
+        location).
+
+        Caveat: Uses a fixed 30.44 days/month for projection. With <3 months of
+        data, confidence is low — the de-seasonalized baseline may not be
+        representative.
+    """
     months = sorted(monthly_totals.keys())
 
     deseasonalized = []
@@ -896,7 +1003,7 @@ def compute_annual_projection(monthly_totals, seasonal_factors, monthly_efficien
     baseline_daily = mean(deseasonalized)
 
     projected_annual_pv = sum(
-        baseline_daily * seasonal_factors.get(str(m), 1.0) * 30.44
+        baseline_daily * seasonal_factors.get(str(m), 1.0) * 30.44  # CAVEAT: fixed 30.44 days/month
         for m in range(1, 13)
     )
 
@@ -965,14 +1072,21 @@ def compute_best_worst_days(rows, ev_days):
 
 
 def compute_carbon_offset(projected_self_consumed, grid_emission_factor):
-    """3o. Carbon offset estimate."""
+    """3o. Carbon offset estimate.
+
+    Note:
+        Assumption: Uses fixed equivalents: 22 kg CO₂/tree/year (mature deciduous
+        tree, temperate climate), 0.21 kg CO₂/km (average passenger car). These
+        are rough order-of-magnitude figures; actual values vary significantly by
+        tree species, vehicle type, and driving conditions.
+    """
     co2_kg = projected_self_consumed * grid_emission_factor
     return {
         "grid_emission_factor": grid_emission_factor,
         "annual_co2_avoided_kg": round(co2_kg, 0),
         "annual_co2_avoided_tonnes": round(co2_kg / 1000, 1),
-        "equiv_trees": round(co2_kg / 22, 0),
-        "equiv_km_driving": round(co2_kg / 0.21, 0),
+        "equiv_trees": round(co2_kg / 22, 0),  # ASSUMPTION: 22 kg CO₂/tree/year
+        "equiv_km_driving": round(co2_kg / 0.21, 0),  # ASSUMPTION: 0.21 kg CO₂/km
     }
 
 
