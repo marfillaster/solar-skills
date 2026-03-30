@@ -122,6 +122,41 @@ ln -s ../../skills/export-hourly-deye .claude/skills/export-hourly-deye
 
 Then open Claude Code from inside the repo directory. The skills are available as `/analyze`, `/export-hourly-soliscloud`, and `/export-hourly-deye` (no `solar-skills:` prefix). Any edits to files under `skills/` take effect immediately, and new skills are picked up automatically — no reinstall needed.
 
+### Option D: Install for Codex
+
+Symlink the skills into your global Codex skills directory:
+
+```bash
+mkdir -p ~/.codex/skills
+ln -s /path/to/solar-skills/skills/analyze ~/.codex/skills/analyze
+ln -s /path/to/solar-skills/skills/export-hourly-soliscloud ~/.codex/skills/export-hourly-soliscloud
+ln -s /path/to/solar-skills/skills/export-hourly-deye ~/.codex/skills/export-hourly-deye
+```
+
+Then invoke them in Codex with prompts such as:
+
+```text
+Use $export-hourly-soliscloud to export my SolisCloud data for 2026-02.
+Use $export-hourly-deye to export my Deye/Solarman data for 2026-02.
+Use $analyze to analyze my solar CSV data and produce a report.
+```
+
+Codex note: `$export-hourly-soliscloud` can use direct API credentials, but its browser fallback depends on the Chrome DevTools MCP plugin being installed and available. If you do not have SolisCloud API credentials configured, make sure the DevTools MCP integration is set up before relying on the fallback path.
+
+Cross-agent note: install and configure the Chrome DevTools MCP plugin in the specific agent environment that will run the skill. If you use both Claude Code and Codex, or if work may be delegated to another agent/session, each runtime that needs the fallback path must have access to the DevTools MCP integration.
+
+Example install commands for the fallback browser path:
+
+```bash
+# Claude Code
+claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
+
+# Codex
+codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
+```
+
+If you're developing inside this repo, you can also point the symlinks directly at this checkout so edits under `skills/` are picked up immediately.
+
 ## Quick Start
 
 ### 1. Set up SolisCloud API credentials
