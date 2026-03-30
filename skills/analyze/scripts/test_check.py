@@ -3,7 +3,7 @@
 Full coverage test suite for analyze.py.
 
 Run from the project root:
-    python3 ${CLAUDE_PLUGIN_ROOT}/scripts/test_check.py
+    python3 skills/analyze/scripts/test_check.py
 
 Tests all analysis functions with synthetic data and optionally validates
 against real CSV data if present in data/.
@@ -13,6 +13,7 @@ import datetime
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -683,10 +684,8 @@ def test_integration_real_data():
         config_path = f.name
 
     try:
-        # Run analyze.py as subprocess to test end-to-end
-        import subprocess
-        # Determine project root (where data/ lives) — 3 levels up from scripts/
-        project_root = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", ".."))
+        # Run analyze.py as subprocess to test end-to-end from the repo root.
+        project_root = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir))
         result = subprocess.run(
             [sys.executable, os.path.join(SCRIPT_DIR, "analyze.py"), config_path],
             capture_output=True, text=True, cwd=project_root
