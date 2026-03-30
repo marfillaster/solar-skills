@@ -94,7 +94,11 @@ The `/solar-skills:analyze` skill asks only 9 questions. Long intake forms cause
 /plugin install solar-skills@marfillaster-solar-skills
 ```
 
+Once installed, the `/solar-skills:export-hourly-soliscloud`, `/solar-skills:export-hourly-deye`, and `/solar-skills:analyze` slash commands become available in Claude Code.
+
 ### Option B: Symlink into your project
+
+Copy or symlink the skills into any project's `.claude/skills/` directory:
 
 ```bash
 mkdir -p .claude/skills
@@ -103,7 +107,20 @@ ln -s /path/to/solar-skills/skills/export-hourly-soliscloud .claude/skills/expor
 ln -s /path/to/solar-skills/skills/export-hourly-deye .claude/skills/export-hourly-deye
 ```
 
-Once installed, the `/solar-skills:export-hourly-soliscloud`, `/solar-skills:export-hourly-deye`, and `/solar-skills:analyze` slash commands become available in Claude Code.
+Skills loaded this way are available without the namespace prefix: `/analyze`, `/export-hourly-soliscloud`, `/export-hourly-deye`.
+
+### Option C: Local development (this repo)
+
+If you've cloned this repo and want to test skills without installing the plugin, run the one-time setup from the repo root:
+
+```bash
+mkdir -p .claude/skills
+ln -s ../../skills/analyze .claude/skills/analyze
+ln -s ../../skills/export-hourly-soliscloud .claude/skills/export-hourly-soliscloud
+ln -s ../../skills/export-hourly-deye .claude/skills/export-hourly-deye
+```
+
+Then open Claude Code from inside the repo directory. The skills are available as `/analyze`, `/export-hourly-soliscloud`, and `/export-hourly-deye` (no `solar-skills:` prefix). Any edits to files under `skills/` take effect immediately, and new skills are picked up automatically — no reinstall needed.
 
 ## Quick Start
 
@@ -156,7 +173,7 @@ solar-skills/
         ├── README.md             # Detailed documentation
         └── scripts/
             ├── api_export.py     # API-based export (pure stdlib)
-            └── chrome_export.js  # Injectable JS for Chrome fallback
+            └── chrome_fetch.py   # Chrome fallback bulk fetcher (captures auth via DevTools MCP, fetches via Python)
 ```
 
 ## Requirements
@@ -167,20 +184,13 @@ solar-skills/
 
 ### Claude Code authentication
 
-Claude Code requires one of the following:
-
-| Auth method | Export paths available |
-|---|---|
-| **Pro/Max subscription** | API export + Chrome fallback |
-| **API key (pay-as-you-go)** | API export only |
-
-To use an API key: sign up at [console.anthropic.com](https://console.anthropic.com/), add billing, generate a key, then set it in your shell profile:
+Any Claude Code authentication method works (Pro/Max subscription or API key). To use an API key: sign up at [console.anthropic.com](https://console.anthropic.com/), add billing, generate a key, then set it in your shell profile:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-The Chrome fallback requires a Pro/Max subscription for MCP tool access (`--chrome` flag).
+The Chrome fallback requires the [Chrome DevTools MCP plugin](https://github.com/ChromeDevTools/chrome-devtools-mcp) to be installed and configured in Claude Code.
 
 ## CSV Format
 

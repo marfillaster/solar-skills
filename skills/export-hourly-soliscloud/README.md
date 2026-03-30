@@ -11,7 +11,7 @@ This skill fetches 5-minute interval data from a SolisCloud-monitored solar+batt
 | Method | Requirements | Speed | Status |
 |---|---|---|---|
 | **API** (primary) | Environment variables with API credentials | ~15s per month | Untested — awaiting Solis API access approval |
-| **Chrome** (fallback) | `--chrome` flag, Pro/Max subscription, browser login | ~30s per month | Working |
+| **Chrome** (fallback) | Chrome DevTools MCP plugin, browser login | ~30s per month | Working |
 
 Both methods produce identical CSV output. The API method does not require an Anthropic Pro/Max subscription — only a direct Anthropic API key or equivalent.
 
@@ -55,10 +55,9 @@ Optional: `SOLISCLOUD_TIMEZONE` — integer UTC offset (e.g. `8` for UTC+8). Def
 
 ## Chrome Fallback Requirements
 
-If API credentials aren't configured, the skill falls back to Chrome browser automation:
+If API credentials aren't configured, the skill falls back to Chrome browser automation via the Chrome DevTools MCP plugin:
 
-- Active Anthropic Pro/Max subscription (the `--chrome` flag requires Pro/Max for MCP tool access)
-- Claude Code running with `--chrome` flag
+- Chrome DevTools MCP plugin installed and active
 - Logged into SolisCloud in Chrome
 
 ## Usage
@@ -104,4 +103,4 @@ Output file: `data/solar_hourly_YYYY-MM.csv`
 | Script | Purpose |
 |---|---|
 | `scripts/api_export.py` | API-based export (stdlib only, no pip dependencies) |
-| `scripts/chrome_export.js` | Injectable JS for Chrome fallback — bulk fetches JSON API and generates CSV in-browser |
+| `scripts/chrome_fetch.py` | Chrome fallback bulk fetcher — takes captured auth headers+body from DevTools MCP, fetches all days via Python, writes CSV (stdlib only) |

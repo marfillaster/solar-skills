@@ -2,7 +2,7 @@
 name: export-hourly-soliscloud
 description: Use when the user asks to export SolisCloud solar data, download solar metrics, get power station data, create hourly solar summary, or mentions SolisCloud export/download. Supports monthly bulk export.
 version: 4.0.0
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests, mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request
 ---
 
 # SolisCloud Monthly Export
@@ -39,7 +39,7 @@ echo "${SOLISCLOUD_API_KEY:-NOT_SET}"
 
   Options:
   1. **Set up API access** — I'll guide you through getting API credentials (recommended, no browser needed)
-  2. **Use Chrome fallback** — Export via browser automation (requires `--chrome` flag)
+  2. **Use Chrome fallback** — Export via browser automation (requires Chrome DevTools MCP plugin)
 
   - If **Set up API access**: follow the API setup guidance below, then tell the user to re-run `/export-hourly-soliscloud` after setting env vars.
   - If **Chrome fallback**: proceed to **Step 3B**.
@@ -123,101 +123,88 @@ Date,Hour,Readings,Avg_PV_W,PV_Energy_kWh,Avg_Battery_W,Battery_Energy_kWh,Avg_G
 
 ## Chrome Fallback Path
 
-### 3B. Pre-flight checks
+### 3B. Check auth cache
 
-Remind the user of requirements using AskUserQuestion:
-
-> **Before we begin, please confirm:**
-> - Claude Code is running with `--chrome` flag (required for browser automation)
-> - You are logged into [SolisCloud](https://www.soliscloud.com) in Chrome
-
-### 4B. Navigate to SolisCloud plant details
-
-- Call `tabs_context_mcp` to find an existing SolisCloud tab, or create a new tab.
-- Navigate to: `https://www.soliscloud.com/overview/plantStation`
-- Click the first row in the Plant List table to open plant details.
-- Wait for the Overview page to load (URL should contain `/details/overview/`).
-- Extract the **Station ID** from the URL — the 19-digit number after `/overview/` (e.g. `1298491919450376600`). Store as `STATION_ID`.
-
-### 5B. Navigate to any day in the target month
-
-- The Operating Data panel has a date picker showing the current date and Day/Month/Year/Lifetime tabs.
-- Ensure the **Day** tab is selected (orange text).
-- Use the `<` and `>` arrows next to the date to navigate to any day within the target month.
-
-### 6B. Install request capture interceptor
-
-Read the script file and inject it via `javascript_tool`:
+Try running the fetch script with cached auth first:
 
 ```bash
-# Read the script
-cat ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_export.js
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py TARGET_MONTH
 ```
 
-Before injecting, replace the template variables in the script content:
-- `__TARGET_MONTH__` → actual `TARGET_MONTH` value (e.g. `2026-01`)
-- `__STATION_ID__` → actual `STATION_ID` from step 4B
+- If it prints `Using cached auth` and succeeds → skip to **Step 8B**.
+- If it prints `Auth cache expired`, `No auth provided`, or exits with code 2 → proceed to **Step 4B** to capture fresh auth.
 
-Inject the modified script via `javascript_tool`. This patches `XMLHttpRequest` to capture auth headers from the next chart API request.
+### 4B. Open SolisCloud in Chrome and navigate to plant details  *(skip if cache was valid)*
 
-Then click the **`<` date arrow** to trigger a `/api/chart/station/day/v2` request. This lets the interceptor capture the auth headers (Authorization, token, Content-MD5, etc.) from SolisCloud's own request.
+- Call `list_pages` to check for an existing SolisCloud tab (URL contains `soliscloud.com`).
+- If found, call `select_page` to switch to it.
+- If not found, call `new_page` then `navigate_page` to `https://www.soliscloud.com`.
+- Call `take_snapshot` to check the current page state.
+- If the page shows a login form (not the dashboard), ask the user via AskUserQuestion:
 
-### 7B. Verify captured headers
+  > **Please log into SolisCloud in Chrome, then reply here to continue.**
 
-Check that headers were captured:
+- Once the user replies, call `wait_for` until the dashboard or plant list is visible before proceeding.
 
-```javascript
-JSON.stringify({ captured: !!window.__solis.capturedHeaders, keys: window.__solis.capturedHeaders ? Object.keys(window.__solis.capturedHeaders) : [] })
+### 4B-2. Navigate to SolisCloud plant details
+
+- Call `navigate_page` to `https://www.soliscloud.com/overview/plantStation`.
+- Call `wait_for` until the Plant List table is visible, then `take_snapshot` to get element UIDs.
+- Click the plant name in the first row of the Plant List table.
+- The site opens plant details in a **new tab**. Call `list_pages` to find the new tab (URL contains `/details/overview/`), then `select_page` to switch to it. Close any duplicate tabs for the same URL.
+- Extract the **Station ID** from the URL — the 19-digit number in the path (e.g. `.../details/overview/1298491919450376600`). Store as `STATION_ID`.
+
+### 5B. Navigate to any day in the target month  *(skip if cache was valid)*
+
+- Call `wait_for` until the Operating Data panel is visible.
+- Call `take_snapshot` to locate the Day/Month/Year tab row and the `<` / `>` date arrows.
+- If the **Day** tab is not already active, click it and wait for the chart to update.
+- If the currently displayed date is not within `TARGET_MONTH`, click the `<` or `>` arrow until it is, waiting for the chart to update each time.
+
+### 6B. Trigger a chart request and capture it  *(skip if cache was valid)*
+
+Click the **`<` date arrow** to trigger a `/api/chart/station/day/v2` request.
+
+Then find it in the network log:
+
+```
+list_network_requests (resourceTypes: xhr, fetch) → find the most recent /api/chart/station/day/v2 entry → note its reqid
 ```
 
-If `captured` is `false`, click the `<` arrow again and re-check. The interceptor auto-restores original XHR prototypes after the first capture.
+Call `get_network_request(reqid)` to retrieve the full request headers and body.
 
-### 8B. Bulk fetch all days
+### 7B. Run the Python bulk fetcher  *(with fresh auth)*
 
-Trigger the bulk fetch:
-
-```javascript
-window.__solis.fetchAllDays().then(s => JSON.stringify(s))
-```
-
-This POSTs to `/api/chart/station/day/v2` for each day using the captured auth headers and returns JSON responses directly (no file downloads). Results are stored in `window.__solis.results`.
-
-Poll progress if needed:
-
-```javascript
-JSON.stringify(window.__solis.fetchStatus)
-```
-
-### 9B. Remove existing download to prevent numeric suffix
-
-Chrome appends a numeric suffix (e.g. `solar_hourly_2026-02 (1).csv`) when a file with the same name already exists in the Downloads folder. Delete any existing file before triggering the download:
+Parse the headers and body from the `get_network_request` result, then pipe them to the fetch script:
 
 ```bash
-rm -f ~/Downloads/solar_hourly_TARGET_MONTH.csv
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py <<'EOF'
+{
+  "target_month": "TARGET_MONTH",
+  "headers": {
+    "authorization": "...",
+    "content-md5": "...",
+    "time": "...",
+    "token": "...",
+    "device-id": "...",
+    "x-cloud-platform": "...",
+    "version": "...",
+    "language": "...",
+    "platform": "...",
+    "accept": "application/json, text/plain, */*",
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "body_template": { "id": "...", "money": "...", "timeZone": 8, "version": 1, "localTimeZone": 8, "language": "2" }
+}
+EOF
 ```
 
-Replace `TARGET_MONTH` with the actual value (e.g. `2026-01`).
+Fill in all values from the `get_network_request` output. The script fetches every day in `TARGET_MONTH`, saves auth to `data/.soliscloud_auth.json`, and writes `data/solar_hourly_TARGET_MONTH.csv`.
 
-### 10B. Process and download CSV
+If the script exits with code 2 (auth rejected), the cache is stale — repeat steps 4B–7B.
 
-Generate the hourly CSV and trigger a browser download:
+### 8B. Display results
 
-```javascript
-JSON.stringify(window.__solis.generateCSV())
-```
-
-This aggregates the 5-minute JSON arrays into hourly buckets matching the output schema, then downloads `solar_hourly_TARGET_MONTH.csv` via blob URL.
-
-### 11B. Move CSV to project and display results
-
-- Move the downloaded CSV from the Downloads folder to `data/solar_hourly_TARGET_MONTH.csv`:
-
-```bash
-mkdir -p data && mv ~/Downloads/solar_hourly_TARGET_MONTH.csv data/solar_hourly_TARGET_MONTH.csv
-```
-
-Replace `TARGET_MONTH` with the actual value (e.g. `2026-01`).
-
-- Read the CSV file and display it to the user.
-- Include the stats returned by `generateCSV()` (total days, rows, PV generation).
+- Read the CSV and display it to the user.
+- Include the stats printed by the script (days, rows, kWh).
 - Highlight key monthly observations (peak generation day, average daily production, battery cycling patterns).
