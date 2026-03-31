@@ -1,7 +1,7 @@
 ---
 name: analyze
 description: Use when the user asks to analyze solar data, review solar performance, get solar recommendations, check system sizing, compare EV vs non-EV days, or assess ROI on their PV system.
-version: 7.0.0
+version: 7.0.1
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
@@ -33,6 +33,8 @@ Use Glob to find all `data/solar_hourly_*.csv` files. If none exist, tell the us
 ### 2. Gather user parameters
 
 Ask the user using AskUserQuestion:
+
+If Codex is running in an environment where `AskUserQuestion` or equivalent structured prompt UI is unavailable, ask the same questions in plain chat one at a time instead of blocking. Keep the sequence interactive and continue once each required answer is provided.
 
 1. **"What city/province are you in?"** — Used to infer latitude, seasonal irradiance profile, grid emission factor, and currency. No default — user must provide.
 2. **"Do you have an EV or PHEV?"** — Yes / No

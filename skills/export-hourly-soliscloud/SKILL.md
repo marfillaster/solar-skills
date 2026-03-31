@@ -1,7 +1,7 @@
 ---
 name: export-hourly-soliscloud
 description: Use when the user asks to export SolisCloud solar data, download solar metrics, get power station data, create hourly solar summary, or mentions SolisCloud export/download. Supports monthly bulk export.
-version: 4.0.0
+version: 4.0.1
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests, mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request
 ---
 
@@ -93,7 +93,7 @@ This script:
 
 - Read the CSV file and display it to the user.
 - Include the summary printed by the script (total days, total readings, total generation, any failures).
-- Highlight key monthly observations (peak generation day, average daily production, battery cycling patterns).
+- Do not analyze the exported data or add month-level observations unless the user separately asks for analysis.
 
 ---
 
@@ -207,4 +207,4 @@ If the script exits with code 2 (auth rejected), the cache is stale — repeat s
 
 - Read the CSV and display it to the user.
 - Include the stats printed by the script (days, rows, kWh).
-- Highlight key monthly observations (peak generation day, average daily production, battery cycling patterns).
+- Do not analyze the exported data or add month-level observations unless the user separately asks for analysis.

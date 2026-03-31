@@ -12,6 +12,8 @@ Invoke via Claude Code:
 
 The skill reads all `data/solar_hourly_*.csv` files, asks for system parameters, runs the analysis, and writes a report to `data/solar-analysis.md`.
 
+If structured prompt tools are unavailable in Codex, the parameter-gathering step should fall back to plain chat questions asked one at a time.
+
 ## Input Format
 
 CSV files in `data/` named `solar_hourly_YYYY-MM.csv` with these columns:
@@ -99,4 +101,4 @@ python3 scripts/test_check.py
 
 ## Version
 
-7.0.0
+7.0.1

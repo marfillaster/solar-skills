@@ -1,8 +1,8 @@
 # SolisCloud Export Skill
 
-Export monthly solar operating data from SolisCloud into hourly CSV files for analysis.
+Export monthly solar operating data from SolisCloud into hourly CSV files without analyzing the resulting CSV unless asked separately.
 
-**Version:** 4.0.0
+**Version:** 4.0.1
 
 ## Overview
 
