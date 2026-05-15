@@ -250,6 +250,8 @@ Produce a narrative markdown report. Use `~` for approximate values in prose. Wr
 - Use `~` prefix for rounded values in prose (e.g. "~21 kWh", "~85% SOC")
 - Tables only where they add clarity: Key Metrics comparison, Capacity Factor summary
 - Collapse low-signal sections: if weekday/weekend self-sufficiency differs by <5pp, summarize in one sentence instead of a full table. If environmental impact has no unusual findings, keep to 2–3 bullets without a dedicated section header — fold into the executive summary or annual projection.
+- **Voice**: write the report as the homeowner's own analysis, not as a consultant addressing the homeowner. Use first-person plural ("we", "our") for household situation and decisions ("our daughter was home", "we are exporting at half-rate"); use neutral phrasing for the system itself ("the system", "the battery"). Avoid second-person ("your 6.5 kWp system", "your daughter") — the report reads like it came from someone else and feels off when the homeowner publishes it under their own name.
+- **No meta-commentary about the analysis process**: do not write "the user clarified", "the user mentioned", "you indicated", "based on what you told me". Such context belongs in the methodology section or simply as a stated fact ("the PHEV was off the road that month"), never as a narrative aside in the executive summary or recommendations. The report should read as findings, not as a conversation transcript.
 
 **Report structure:**
 
@@ -270,7 +272,7 @@ Based on analysis of solar data from {month range} ({x} days).
 
 {3–5 lines maximum. Lead with the single most important finding, then key number, then top action. This should be readable in 15 seconds.}
 
-{Example: "Your 6.5 kWp system is well-sized for household consumption and on track for a 4.5-year payback on $15k invested. Self-sufficiency improved from 60% to 73% as the dry season progressed. The single highest-impact optimization is shifting EV charging to morning hours (09:00–14:00), which could save an additional $400–700/year and reduce payback to ~3.8 years. No equipment faults detected, though two days of abnormally low generation warrant a check of inverter logs."}
+{Example: "The 6.5 kWp system is well-sized for household consumption and on track for a 4.5-year payback on $15k invested. Self-sufficiency improved from 60% to 73% as the dry season progressed. The single highest-impact optimization is shifting EV charging to morning hours (09:00–14:00), which could save an additional $400–700/year and reduce payback to ~3.8 years. No equipment faults detected, though two days of abnormally low generation warrant a check of inverter logs."}
 
 {If anomalies requiring action were detected, mention them here: "Action needed: {date} showed near-zero PV output — check inverter logs to rule out equipment fault."}
 
@@ -343,7 +345,7 @@ Similar multi-paragraph structure with data-backed reasoning.
 |---|---|---|---|---|
 | {Mon} | {currency}{x} | {currency}{x} | {currency}{x} | {currency}{x} |
 
-{For tiered tariffs: "Solar reduces your monthly consumption from tier {x} ({rate}/kWh) to tier {y} ({rate}/kWh), saving an additional {currency}{x}/month beyond the raw kWh offset."}
+{For tiered tariffs: "Solar reduces monthly grid consumption from tier {x} ({rate}/kWh) to tier {y} ({rate}/kWh), saving an additional {currency}{x}/month beyond the raw kWh offset."}
 
 {For TOU tariffs: "Solar generation peaks during {peak/off-peak} hours, offsetting {currency}{x}/month of {peak rate} electricity. Export credit during {peak/off-peak} hours adds {currency}{x}/month."}
 
@@ -515,6 +517,7 @@ This section documents the heuristics, assumptions, and caveats used in the anal
 - Additional panels projection scales PV output linearly — assumes same orientation, tilt, and shading as existing panels. Does not model inverter clipping from additional capacity. {If clipping was detected: "Because inverter clipping was detected, this projection is optimistic."}
 
 ### Environmental
+- Avoided CO₂ is computed as **self-consumed kWh × grid factor**, not gross PV × grid factor. This is conservative — exported kWh also displace fossil generation on the grid, and a gross-displacement convention would add roughly the export share (~10% in typical residential systems with high self-consumption). The self-consumption-only figure is what `analyze.py` returns by design.
 - Carbon equivalents use fixed values: 22 kg CO₂/tree/year (mature deciduous tree, temperate climate), 0.21 kg CO₂/km (average passenger car). Actual values vary significantly by species, vehicle type, and conditions.
 - {If feedin_ratio > 0: "Feed-in tariff assumed constant; regulatory changes could affect export revenue."}
 
