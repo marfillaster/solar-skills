@@ -2,8 +2,16 @@
 """
 chrome_fetch.py — SolisCloud Chrome fallback bulk fetcher
 
+The SolisCloud web UI signs every request with a per-request HMAC-SHA1 over the
+request body's Content-MD5 (canonical string: METHOD\nContent-MD5\nContent-Type\n
+Date\n/chart/station/day/v2). The signing key + keyId are static constants baked
+into the web JS bundle, so this script re-signs each day itself rather than
+replaying a captured signature (replay fails because every day's body — and thus
+its MD5 and signature — differs). The only session-bound secret is the login
+cookie, which is httpOnly and must be captured once from the browser.
+
 Usage:
-  # Fresh auth from browser — pipe get_network_request output, saves to cache:
+  # Fresh auth — pipe the cookie (+ optional device-id/station) once after login:
   echo '<json>' | python3 chrome_fetch.py 2026-01
 
   # Cached auth — reuses data/.soliscloud_auth.json if still fresh:
@@ -14,17 +22,20 @@ Usage:
 
 Stdin JSON format (when providing fresh auth):
   {
-    "headers": { "authorization": "...", "token": "...", ... },
-    "body_template": { "id": "...", "money": "PHP", "timeZone": 8, ... }
+    "cookie": "token=token_<uuid>",          # required; httpOnly session cookie
+    "device_id": "<headerDeviceId>",         # optional; defaults to a known value
+    "station_id": "1298491919450376600"      # optional; or pass body_template
   }
+  (Legacy: a "body_template" object is still accepted and its "id" used as station.)
 
-Auth is cached to data/.soliscloud_auth.json. Cached auth is reused for up to
-CACHE_TTL_HOURS without needing to open the browser again.
-
-Auth headers (Content-MD5, Authorization, Time) are reused as-is — the server
-does not re-validate them per-body, as confirmed by the existing XHR fallback.
+To obtain the cookie: in the browser, trigger one Operating-Data chart request,
+call get_network_request on it, and copy the value after "token=" in its Cookie
+header. Auth is cached to data/.soliscloud_auth.json for CACHE_TTL_HOURS.
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -32,21 +43,25 @@ import time
 import urllib.error
 import urllib.request
 from calendar import monthrange
-from datetime import datetime
+from datetime import datetime, timezone
 
 CACHE_PATH = 'data/.soliscloud_auth.json'
 CACHE_TTL_HOURS = 4
 
-# Headers to forward. Skip browser-fingerprinting and connection headers
-# that urllib handles itself or that would confuse the server.
-SKIP_HEADERS = {
-    ':authority', ':method', ':path', ':scheme',
-    'accept-encoding', 'content-length', 'origin',
-    'priority', 'referer', 'sec-ch-ua', 'sec-ch-ua-mobile',
-    'sec-ch-ua-platform', 'sec-fetch-dest', 'sec-fetch-mode',
-    'sec-fetch-site', 'user-agent', 'cookie',
-    'accept-language',
-}
+API_PATH = '/api/chart/station/day/v2'
+SIGN_PATH = '/chart/station/day/v2'
+CONTENT_TYPE = 'application/json'
+REQUEST_CONTENT_TYPE = 'application/json;charset=UTF-8'
+DEFAULT_DEVICE_ID = 'vKAihGyggoe9PKuRYrWvaS4vo69FSE6JEV2HIszKhSaYx5XQ1deqpbHsdKTeOfGP'
+
+# Static signing material extracted from the SolisCloud web bundle. The bundle
+# stores these as bit strings with a complement transform.
+WEB_KEY_ID_BITS = '011010000111'
+WEB_SECRET_PARTS = (
+    '0101100111111011000001111101110001000100011',
+    '01010111010001000110101100110111110000010100',
+    '00111111101001100101010101110011',
+)
 
 CSV_HEADER = (
     'Date,Hour,Readings,Avg_PV_W,PV_Energy_kWh,'
@@ -59,6 +74,23 @@ CSV_HEADER = (
 
 
 # --- Auth cache ---
+
+def bit_complement(value):
+    return ''.join('1' if c == '0' else '0' for c in value)
+
+
+def web_key_id():
+    return str(int(bit_complement(WEB_KEY_ID_BITS), 2))
+
+
+def web_secret():
+    first, second, third = WEB_SECRET_PARTS
+    return (
+        str(int(bit_complement(first), 2)) +
+        format(int(bit_complement(second), 2), 'x') +
+        format(int(bit_complement(third), 2), 'x')
+    )
+
 
 def load_cache():
     if not os.path.exists(CACHE_PATH):
@@ -73,15 +105,86 @@ def load_cache():
     return cache
 
 
-def save_cache(headers, body_template):
+def save_cache(auth):
     os.makedirs('data', exist_ok=True)
     with open(CACHE_PATH, 'w') as f:
-        json.dump({'captured_at': time.time(), 'headers': headers, 'body_template': body_template}, f, indent=2)
+        data = {'captured_at': time.time(), **auth}
+        json.dump(data, f, indent=2)
     print(f'Auth cached to {CACHE_PATH}.', flush=True)
 
 
+def header_value(headers, name):
+    if not headers:
+        return None
+    wanted = name.lower()
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if key.lower() == wanted:
+                return value
+    elif isinstance(headers, list):
+        for header in headers:
+            key = (header.get('name') or header.get('key') or '').lower()
+            if key == wanted:
+                return header.get('value')
+    return None
+
+
+def normalize_cookie(cookie):
+    if not cookie:
+        return None
+    cookie = cookie.strip()
+    if not cookie:
+        return None
+    if cookie.startswith('token='):
+        return cookie
+    if cookie.startswith('token_'):
+        return f'token={cookie}'
+    if 'token=token_' in cookie:
+        parts = [p.strip() for p in cookie.split(';')]
+        token_part = next((p for p in parts if p.startswith('token=token_')), None)
+        if token_part:
+            return token_part
+    return cookie
+
+
+def body_template_from_context(ctx):
+    body_template = dict(ctx.get('body_template') or {})
+    station_id = ctx.get('station_id') or body_template.get('id')
+    if not station_id:
+        raise ValueError('Fresh auth requires station_id or body_template.id')
+
+    body_template.update({
+        'id': str(station_id),
+        'money': body_template.get('money', ctx.get('money', 'PHP')),
+        'timeZone': int(body_template.get('timeZone', ctx.get('time_zone', 8))),
+        'version': int(body_template.get('version', 1)),
+        'localTimeZone': int(body_template.get('localTimeZone', ctx.get('local_time_zone', 8))),
+        'language': str(body_template.get('language', ctx.get('language', '2'))),
+    })
+    body_template.pop('date', None)
+    body_template.pop('localTime', None)
+    body_template.pop('time', None)
+    return body_template
+
+
+def normalize_auth(ctx):
+    headers = ctx.get('headers') or {}
+    cookie = normalize_cookie(
+        ctx.get('cookie') or
+        header_value(headers, 'cookie')
+    )
+    if not cookie:
+        raise ValueError('Fresh auth requires a Cookie header containing token=token_<uuid>')
+
+    return {
+        'cookie': cookie,
+        'device_id': ctx.get('device_id') or header_value(headers, 'device-id') or DEFAULT_DEVICE_ID,
+        'body_template': body_template_from_context(ctx),
+    }
+
+
 def load_auth(use_cache):
-    """Return (headers, body_template). Reads stdin if provided, else cache."""
+    """Return normalized auth. Reads stdin if provided, else cache."""
     stdin_data = None
     if not sys.stdin.isatty():
         raw = sys.stdin.read()
@@ -89,33 +192,65 @@ def load_auth(use_cache):
             stdin_data = raw
 
     if stdin_data is not None:
-        ctx = json.loads(stdin_data)
-        headers       = ctx['headers']
-        body_template = ctx['body_template']
-        save_cache(headers, body_template)
-        return headers, body_template
+        try:
+            auth = normalize_auth(json.loads(stdin_data))
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f'Invalid auth input: {e}', file=sys.stderr)
+            sys.exit(1)
+        save_cache(auth)
+        return auth
 
     if use_cache:
         cache = load_cache()
         if cache:
-            return cache['headers'], cache['body_template']
+            try:
+                return normalize_auth(cache)
+            except ValueError as e:
+                print(f'Cached auth is not usable: {e}', file=sys.stderr)
 
     print('No auth provided and no valid cache found.', file=sys.stderr)
-    print('Pipe get_network_request output to this script, or re-run the browser capture.', file=sys.stderr)
+    print('Pipe a captured Cookie header + station_id to this script, or re-run the browser capture.', file=sys.stderr)
     sys.exit(1)
 
 
 # --- HTTP ---
 
-def fetch_day(session_headers, body_template, day):
-    body = {**body_template, 'date': day, 'time': day, 'localTime': int(time.time() * 1000)}
-    data = json.dumps(body).encode()
+def sign_request(body_bytes, date_str):
+    content_md5 = base64.b64encode(hashlib.md5(body_bytes).digest()).decode()
+    canonical = f'POST\n{content_md5}\n{CONTENT_TYPE}\n{date_str}\n{SIGN_PATH}'
+    signature = hmac.new(
+        web_secret().encode(),
+        canonical.encode(),
+        hashlib.sha1,
+    ).digest()
+    return content_md5, f'WEB {web_key_id()}:{base64.b64encode(signature).decode()}'
+
+
+def fetch_day(auth, day):
+    body_template = auth['body_template']
+    body = {**body_template, 'time': day, 'localTime': int(time.time() * 1000)}
+    data = json.dumps(body, separators=(',', ':')).encode()
+    date_str = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+    content_md5, authorization = sign_request(data, date_str)
     req = urllib.request.Request(
-        'https://www.soliscloud.com/api/chart/station/day/v2',
+        f'https://www.soliscloud.com{API_PATH}',
         data=data,
         method='POST',
     )
-    for name, value in session_headers.items():
+    headers = {
+        'Content-MD5': content_md5,
+        'Time': date_str,
+        'Authorization': authorization,
+        'Content-Type': REQUEST_CONTENT_TYPE,
+        'x-cloud-platform': 'GLY',
+        'version': '5.2.501',
+        'platform': 'Web',
+        'device-id': auth['device_id'],
+        'language': body_template.get('language', '2'),
+        'Accept': 'application/json, text/plain, */*',
+        'Cookie': auth['cookie'],
+    }
+    for name, value in headers.items():
         req.add_header(name, value)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
@@ -211,8 +346,7 @@ def main():
         print('Usage: chrome_fetch.py YYYY-MM [--no-cache]', file=sys.stderr)
         sys.exit(1)
 
-    raw_headers, body_template = load_auth(use_cache)
-    session_headers = {k: v for k, v in raw_headers.items() if k.lower() not in SKIP_HEADERS}
+    auth = load_auth(use_cache)
 
     days = days_in_month(target_month)
     print(f'Fetching {len(days)} days for {target_month}...', flush=True)
@@ -224,7 +358,7 @@ def main():
 
     for i, day in enumerate(days):
         try:
-            resp = fetch_day(session_headers, body_template, day)
+            resp = fetch_day(auth, day)
             if resp.get('code') in ('401', '403') or resp.get('success') is False:
                 print(f'\nAuth rejected by server. Delete {CACHE_PATH} and re-run with fresh browser capture.', file=sys.stderr)
                 sys.exit(2)

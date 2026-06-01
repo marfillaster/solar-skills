@@ -103,4 +103,4 @@ Output file: `data/solar_hourly_YYYY-MM.csv`
 | Script | Purpose |
 |---|---|
 | `scripts/api_export.py` | API-based export (stdlib only, no pip dependencies) |
-| `scripts/chrome_fetch.py` | Chrome fallback bulk fetcher — takes captured auth headers+body from DevTools MCP, fetches all days via Python, writes CSV (stdlib only) |
+| `scripts/chrome_fetch.py` | Chrome fallback bulk fetcher — takes a captured SolisCloud session cookie and station ID, re-signs daily web requests in Python, writes CSV (stdlib only) |

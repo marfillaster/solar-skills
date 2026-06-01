@@ -1,7 +1,7 @@
 ---
 name: export-hourly-soliscloud
 description: Use when the user asks to export SolisCloud solar data, download solar metrics, get power station data, create hourly solar summary, or mentions SolisCloud export/download. Supports monthly bulk export.
-version: 4.0.1
+version: 4.0.2
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests, mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request
 ---
 
@@ -175,31 +175,19 @@ Call `get_network_request(reqid)` to retrieve the full request headers and body.
 
 ### 7B. Run the Python bulk fetcher  *(with fresh auth)*
 
-Parse the headers and body from the `get_network_request` result, then pipe them to the fetch script:
+Parse the `cookie` header and station ID from the `get_network_request` result, then pipe them to the fetch script. The session token is in the httpOnly `token=token_<uuid>` cookie; captured `Content-MD5`, `Time`, and `Authorization` headers are request-specific and should not be replayed.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py <<'EOF'
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py TARGET_MONTH <<'EOF'
 {
-  "target_month": "TARGET_MONTH",
-  "headers": {
-    "authorization": "...",
-    "content-md5": "...",
-    "time": "...",
-    "token": "...",
-    "device-id": "...",
-    "x-cloud-platform": "...",
-    "version": "...",
-    "language": "...",
-    "platform": "...",
-    "accept": "application/json, text/plain, */*",
-    "content-type": "application/json;charset=UTF-8"
-  },
-  "body_template": { "id": "...", "money": "...", "timeZone": 8, "version": 1, "localTimeZone": 8, "language": "2" }
+  "cookie": "token=token_<uuid>",
+  "device_id": "<device-id header value, optional>",
+  "station_id": "1298491919450376600"
 }
 EOF
 ```
 
-Fill in all values from the `get_network_request` output. The script fetches every day in `TARGET_MONTH`, saves auth to `data/.soliscloud_auth.json`, and writes `data/solar_hourly_TARGET_MONTH.csv`.
+Fill in the cookie from the captured request's `Cookie` header and the station ID from the plant details URL or captured body `id`. The script re-signs every request, fetches every day in `TARGET_MONTH`, saves auth to `data/.soliscloud_auth.json`, and writes `data/solar_hourly_TARGET_MONTH.csv`.
 
 If the script exits with code 2 (auth rejected), the cache is stale — repeat steps 4B–7B.
 
