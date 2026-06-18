@@ -9,6 +9,8 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 
 Analyze hourly solar CSV data from `data/` and produce a consultant-style performance report with actionable recommendations.
 
+**Data directory:** Defaults to `data/` (relative to the current working directory). If the `SOLAR_DATA_DIR` environment variable is set, use that directory instead — for every `data/...` path below (Glob input, the `analysis_config.json` you write, and the `solar-analysis.md` report). `analyze.py` reads `SOLAR_DATA_DIR` on its own; check it with `echo "$SOLAR_DATA_DIR"` and substitute it wherever `data/` appears.
+
 ## Arguments
 
 `$ARGUMENTS` — None required. Reads all `solar_hourly_*.csv` files from `data/`.

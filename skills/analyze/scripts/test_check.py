@@ -658,7 +658,7 @@ def test_integration_synthetic():
 
 def test_integration_real_data():
     """Integration test against real CSV files if available."""
-    data_dir = analyze.Path("data")
+    data_dir = analyze.resolve_data_dir()
     files = sorted(data_dir.glob("solar_hourly_*.csv"))
     if not files:
         print("SKIP: No real CSV data found in data/")

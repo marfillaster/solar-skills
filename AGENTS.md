@@ -25,7 +25,9 @@ All core scripts use **Python stdlib only**. Do not introduce external dependenc
 
 ## Working Directory
 
-All scripts assume they are run from the **project root** (the directory containing `data/`). File paths like `data/solar_hourly_*.csv` are relative to this root.
+All scripts default to a `data/` directory under the **current working directory**, so they are normally run from the **project root** (the directory containing `data/`). File paths like `data/solar_hourly_*.csv` are relative to this root.
+
+Set the `SOLAR_DATA_DIR` environment variable to read and write the CSVs (and the SolisCloud auth cache) somewhere else — absolute, or relative to the current working directory. It is honored by `analyze.py`, both `api_export.py` exports, and `chrome_fetch.py`, so exports and analysis stay in sync. Useful for keeping the data in a synced/version-controlled folder outside the repo.
 
 ## CSV Contract
 

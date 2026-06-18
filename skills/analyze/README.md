@@ -10,7 +10,7 @@ Invoke via Claude Code:
 /solar-skills:analyze
 ```
 
-The skill reads all `data/solar_hourly_*.csv` files, asks for system parameters, runs the analysis, and writes a report to `data/solar-analysis.md`.
+The skill reads all `data/solar_hourly_*.csv` files, asks for system parameters, runs the analysis, and writes a report to `data/solar-analysis.md`. The `data/` directory defaults to the current working directory; set the `SOLAR_DATA_DIR` environment variable to point read and write elsewhere.
 
 If structured prompt tools are unavailable in Codex, the parameter-gathering step should fall back to plain chat questions asked one at a time.
 

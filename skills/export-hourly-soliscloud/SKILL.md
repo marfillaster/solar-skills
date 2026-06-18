@@ -101,7 +101,7 @@ This script:
 
 Both export paths produce identical CSV output. The analyze skill depends on this exact schema.
 
-**File:** `data/solar_hourly_YYYY-MM.csv`
+**File:** `data/solar_hourly_YYYY-MM.csv` (or `$SOLAR_DATA_DIR/solar_hourly_YYYY-MM.csv` when the `SOLAR_DATA_DIR` environment variable is set — the export scripts honor it automatically).
 
 ```
 Date,Hour,Readings,Avg_PV_W,PV_Energy_kWh,Avg_Battery_W,Battery_Energy_kWh,Avg_Grid_W,Grid_Energy_kWh,Avg_GridLoad_W,GridLoad_Energy_kWh,Avg_BackupLoad_W,BackupLoad_Energy_kWh,Avg_SOC_Pct,Min_SOC_Pct,Max_SOC_Pct

@@ -263,11 +263,17 @@ def main():
     tz_offset = get_timezone_offset()
 
     num_days = calendar.monthrange(year, month)[1]
-    output_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
-        "data",
-    )
+    # Output dir: SOLAR_DATA_DIR env override (absolute or relative to CWD),
+    # else the repo-level `data/` dir alongside the skills.
+    output_dir = os.environ.get("SOLAR_DATA_DIR", "").strip()
+    if output_dir:
+        output_dir = os.path.expanduser(output_dir)
+    else:
+        output_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
+            "data",
+        )
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Exporting SolisCloud data for {target_month} ({num_days} days)")

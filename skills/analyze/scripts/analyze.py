@@ -31,6 +31,7 @@ import csv
 import datetime
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -39,6 +40,17 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def resolve_data_dir() -> Path:
+    """Resolve the directory holding solar_hourly_*.csv exports.
+
+    Override with the ``SOLAR_DATA_DIR`` environment variable (absolute, or
+    relative to the current working directory); defaults to ``data`` under the
+    current working directory.
+    """
+    override = os.environ.get("SOLAR_DATA_DIR", "").strip()
+    return Path(override).expanduser() if override else Path("data")
+
 
 def load_csv_files(data_dir: Path) -> list[dict]:
     """Load all solar_hourly_*.csv files, return list of row dicts."""
@@ -1115,7 +1127,7 @@ def main():
     currency = config.get("currency", "$")
     system_age = roi_config.get("system_age_years", 0) if roi_config else 0
 
-    data_dir = Path("data")
+    data_dir = resolve_data_dir()
     rows, filenames = load_csv_files(data_dir)
     for r in rows:
         enrich(r)

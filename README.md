@@ -235,3 +235,7 @@ All export methods produce identical output in `data/solar_hourly_YYYY-MM.csv` w
 - **Grid:** positive = export, negative = import
 
 See each skill's README for full details.
+
+## Data directory
+
+The skills read and write CSVs (and the report) under `data/` in the current working directory by default. Set the `SOLAR_DATA_DIR` environment variable to use a different directory — absolute, or relative to the current working directory. It is honored by the analysis script and every export path, so exports and analysis stay in sync. Useful for keeping the data in a synced or version-controlled folder outside the repo.

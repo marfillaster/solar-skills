@@ -60,7 +60,7 @@ If no month is specified, uses the current month.
 
 ## Output Format
 
-Output file: `data/solar_hourly_YYYY-MM.csv`
+Output file: `data/solar_hourly_YYYY-MM.csv` (set `SOLAR_DATA_DIR` to write elsewhere)
 
 ### Columns
 

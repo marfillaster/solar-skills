@@ -45,7 +45,17 @@ import urllib.request
 from calendar import monthrange
 from datetime import datetime, timezone
 
-CACHE_PATH = 'data/.soliscloud_auth.json'
+def solar_data_dir() -> str:
+    """Data directory for exports and the auth cache.
+
+    Override with the ``SOLAR_DATA_DIR`` environment variable (absolute, or
+    relative to the current working directory); defaults to ``data``.
+    """
+    override = os.environ.get("SOLAR_DATA_DIR", "").strip()
+    return os.path.expanduser(override) if override else 'data'
+
+
+CACHE_PATH = os.path.join(solar_data_dir(), '.soliscloud_auth.json')
 CACHE_TTL_HOURS = 4
 
 API_PATH = '/api/chart/station/day/v2'
@@ -387,8 +397,9 @@ def main():
         if (i + 1) % 5 == 0:
             print(f'  {i + 1}/{len(days)} done', flush=True)
 
-    os.makedirs('data', exist_ok=True)
-    out_path = f'data/solar_hourly_{target_month}.csv'
+    data_dir = solar_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    out_path = os.path.join(data_dir, f'solar_hourly_{target_month}.csv')
     with open(out_path, 'w') as f:
         f.write('\n'.join(rows) + '\n')
 
