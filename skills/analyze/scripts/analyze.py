@@ -15,10 +15,17 @@ Input: JSON config on stdin or as file argument with keys:
     additional_kwp      float   Additional panel capacity (0 if none)
     seasonal_factors    dict    Month number (str) -> adjustment factor
     grid_emission_factor float  kg CO2/kWh for the user's grid
-    tariff.type         str     "flat", "tiered", or "tou"
+    tariff.type         str     "flat", "tiered", or "tou" (the current tariff)
     tariff.import_rate  float   Flat rate per kWh
     tariff.tiers        list    [{threshold, rate}, ...] for tiered (optional)
     tariff.tou          dict    {peak_hours: [...], peak_rate, offpeak_rate} (optional)
+    tariff_history      list    Optional effective-dated tariff overrides:
+                                [{effective: "YYYY-MM", type, import_rate, tiers?,
+                                  tou?, feedin_ratio?}, ...]. Each month is billed
+                                at the latest entry whose `effective` <= that month;
+                                months before every entry use the current `tariff`.
+                                The forward-looking annual projection always uses
+                                the current `tariff`.
     roi                 dict    {total_cost, system_age_years} or null
     currency            str     Currency symbol
 
@@ -737,18 +744,31 @@ def compute_anomalies(rows, ev_days, non_ev_days):
     }
 
 
-def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
-    """3i. Bill impact estimate.
+def resolve_month_tariff(month, base_tariff, base_feedin, tariff_history):
+    """Pick the tariff in effect for a ``YYYY-MM`` month.
 
-    Note:
-        Assumption (tiered tariff): Treats tier thresholds as cumulative (each tier
-        covers threshold[i] - threshold[i-1] kWh). Some utilities use
-        non-cumulative block structures which would require different logic.
+    ``tariff_history`` is an optional list of effective-dated overrides, each a
+    full tariff object plus ``effective`` (``YYYY-MM``) and an optional
+    ``feedin_ratio``. The entry with the latest ``effective`` that is <= ``month``
+    wins; months earlier than every entry fall back to ``base_tariff`` /
+    ``base_feedin`` (the current tariff). Returns ``(tariff, feedin_ratio)``.
+    """
+    chosen = None
+    for entry in tariff_history or []:
+        eff = entry.get("effective", "")
+        if eff and eff <= month and (chosen is None or eff > chosen.get("effective", "")):
+            chosen = entry
+    if chosen is None:
+        return base_tariff, base_feedin
+    return chosen, chosen.get("feedin_ratio", base_feedin)
 
-        Caveat (feed-in credit): Applies a flat feed-in rate
-        (import_rate * feedin_ratio) regardless of TOU period. Utilities with
-        time-differentiated feed-in tariffs will see inaccurate export revenue
-        estimates.
+
+def _bill_for_month(mrows, total_load, grid_import, grid_export, tariff, feedin_ratio):
+    """Cost of one month's import with/without solar, plus feed-in credit.
+
+    Assumption (tiered): tier thresholds are cumulative (each tier covers
+    threshold[i] - threshold[i-1] kWh). Caveat (feed-in credit): a flat rate
+    (import_rate * feedin_ratio) is applied regardless of TOU period.
     """
     tariff_type = tariff.get("type", "flat")
     import_rate = tariff.get("import_rate", 0)
@@ -778,8 +798,7 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
             cost += remaining * tiers[-1].get("rate", import_rate)
         return cost
 
-    def calc_tou_monthly(mrows, rate_fn):
-        """Apply TOU rates to hourly data."""
+    def calc_tou_monthly(rate_fn):
         tou = tariff.get("tou", {})
         peak_hours = set(tou.get("peak_hours", []))
         peak_rate = tou.get("peak_rate", import_rate)
@@ -787,45 +806,78 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
         cost = 0
         for r in mrows:
             kwh = rate_fn(r)
-            if r["Hour"] in peak_hours:
-                cost += kwh * peak_rate
-            else:
-                cost += kwh * offpeak_rate
+            cost += kwh * (peak_rate if r["Hour"] in peak_hours else offpeak_rate)
         return cost
 
-    calc_fn = {"flat": calc_flat, "tiered": calc_tiered}.get(tariff_type, calc_flat)
+    if tariff_type == "tou":
+        without_solar = calc_tou_monthly(lambda r: r["Load_kWh"])
+        with_solar = calc_tou_monthly(lambda r: r["Grid_Import_kWh"])
+    elif tariff_type == "tiered":
+        without_solar = calc_tiered(total_load)
+        with_solar = calc_tiered(grid_import)
+    else:
+        without_solar = calc_flat(total_load)
+        with_solar = calc_flat(grid_import)
+
+    feedin_credit = grid_export * import_rate * feedin_ratio  # CAVEAT: flat rate, ignores TOU
+    return without_solar, with_solar, feedin_credit
+
+
+def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_history=None):
+    """3i. Bill impact estimate.
+
+    Each month is costed at the tariff in effect that month (``tariff_history``,
+    optional). The forward-looking annual projection always uses the current
+    ``tariff`` / ``feedin_ratio``, so it reflects today's rates regardless of
+    history. With no ``tariff_history`` the two coincide and the output is
+    unchanged.
+
+    See ``_bill_for_month`` for the tiered/feed-in assumptions.
+    """
+    tariff_type = tariff.get("type", "flat")
+    history_applied = False
 
     by_month = group_by(rows, row_month)
     monthly_bill = {}
+    # Current-tariff sums drive the forward-looking annual projection.
+    cur_without = cur_with = cur_credit = cur_days = 0
     for m, mrows in sorted(by_month.items()):
         total_load = sum(r["Load_kWh"] for r in mrows)
         grid_import = sum(r["Grid_Import_kWh"] for r in mrows)
         grid_export = sum(r["Grid_Export_kWh"] for r in mrows)
+        days = monthly_totals[m]["days"] if m in monthly_totals else 30
 
-        if tariff_type == "tou":
-            without_solar = calc_tou_monthly(mrows, lambda r: r["Load_kWh"])
-            with_solar = calc_tou_monthly(mrows, lambda r: r["Grid_Import_kWh"])
-        else:
-            without_solar = calc_fn(total_load)
-            with_solar = calc_fn(grid_import)
+        m_tariff, m_feedin = resolve_month_tariff(m, tariff, feedin_ratio, tariff_history)
+        if m_tariff is not tariff:
+            history_applied = True
 
-        feedin_credit = grid_export * import_rate * feedin_ratio  # CAVEAT: flat rate, ignores TOU
+        # Historical (as-billed) figures for this month.
+        without_solar, with_solar, feedin_credit = _bill_for_month(
+            mrows, total_load, grid_import, grid_export, m_tariff, m_feedin)
         net_savings = without_solar - with_solar + feedin_credit
 
-        days = monthly_totals[m]["days"] if m in monthly_totals else 30
         monthly_bill[m] = {
             "without_solar": round(without_solar, 0),
             "with_solar": round(with_solar, 0),
             "feedin_credit": round(feedin_credit, 0),
             "net_savings": round(net_savings, 0),
             "days": days,
+            "tariff_type": m_tariff.get("type", "flat"),
+            "import_rate": m_tariff.get("import_rate", 0),
         }
 
-        # Tier reduction info for tiered tariffs
-        if tariff_type == "tiered":
-            tiers = tariff.get("tiers", [])
+        # Current-tariff figures for the annual projection basis.
+        c_without, c_with, c_credit = _bill_for_month(
+            mrows, total_load, grid_import, grid_export, tariff, feedin_ratio)
+        cur_without += c_without
+        cur_with += c_with
+        cur_credit += c_credit
+        cur_days += days
+
+        # Tier reduction info for tiered tariffs (using the month's tariff).
+        if m_tariff.get("type") == "tiered":
+            tiers = m_tariff.get("tiers", [])
             if tiers:
-                # Which tier without solar
                 for i, t in enumerate(tiers):
                     if total_load <= t.get("threshold", float("inf")):
                         without_tier = i + 1
@@ -841,20 +893,16 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals):
                 monthly_bill[m]["without_tier"] = without_tier
                 monthly_bill[m]["with_tier"] = with_tier
 
-    # Annual projection
-    total_days = sum(v["days"] for v in monthly_bill.values())
-    total_without = sum(v["without_solar"] for v in monthly_bill.values())
-    total_with = sum(v["with_solar"] for v in monthly_bill.values())
-    total_credit = sum(v["feedin_credit"] for v in monthly_bill.values())
-    total_savings = sum(v["net_savings"] for v in monthly_bill.values())
-
-    annual_without = total_without / total_days * 365 if total_days > 0 else 0
-    annual_with = total_with / total_days * 365 if total_days > 0 else 0
-    annual_credit = total_credit / total_days * 365 if total_days > 0 else 0
-    annual_savings = total_savings / total_days * 365 if total_days > 0 else 0
+    # Annual projection — current tariff applied to all tracked months.
+    cur_savings = cur_without - cur_with + cur_credit
+    annual_without = cur_without / cur_days * 365 if cur_days > 0 else 0
+    annual_with = cur_with / cur_days * 365 if cur_days > 0 else 0
+    annual_credit = cur_credit / cur_days * 365 if cur_days > 0 else 0
+    annual_savings = cur_savings / cur_days * 365 if cur_days > 0 else 0
 
     return {
         "tariff_type": tariff_type,
+        "tariff_history_applied": history_applied,
         "monthly": monthly_bill,
         "annual_without_solar": round(annual_without, 0),
         "annual_with_solar": round(annual_with, 0),
@@ -1123,6 +1171,7 @@ def main():
     seasonal_factors = config.get("seasonal_factors", {str(m): 1.0 for m in range(1, 13)})
     grid_emission_factor = config.get("grid_emission_factor", 0.5)
     tariff = config.get("tariff", {"type": "flat", "import_rate": 0})
+    tariff_history = config.get("tariff_history", [])
     roi_config = config.get("roi")
     currency = config.get("currency", "$")
     system_age = roi_config.get("system_age_years", 0) if roi_config else 0
@@ -1167,7 +1216,7 @@ def main():
     anomalies = compute_anomalies(rows, ev_days, non_ev_days)
 
     # 3i
-    bill_impact = compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals)
+    bill_impact = compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_history)
 
     # 3j
     roi = compute_roi(bill_impact, roi_config)

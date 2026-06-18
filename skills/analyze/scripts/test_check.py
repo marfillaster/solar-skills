@@ -473,6 +473,51 @@ def test_bill_impact():
     m4 = bi4["monthly"]["2026-01"]
     check("bi_zero_feedin_credit", m4["feedin_credit"] == 0)
 
+    # No history → flag off, monthly import_rate reflects the base tariff
+    check("bi_no_history_flag", bi["tariff_history_applied"] is False)
+    check("bi_no_history_rate", bi["monthly"]["2026-01"]["import_rate"] == 14.0)
+
+
+def test_tariff_history():
+    """Historical tariff overrides bill past months; annual stays current-rate."""
+    # Two months: 2026-01 (31 days) + 2026-02 (28 days)
+    rows = enrich_all(make_dataset(59, start_date="2026-01-01"))
+    mt = analyze.compute_monthly_totals(rows)
+    base = {"type": "flat", "import_rate": 14.0}
+
+    # resolve_month_tariff: months before every entry fall back to base
+    history = [{"effective": "2026-02", "type": "flat", "import_rate": 20.0}]
+    t_jan, f_jan = analyze.resolve_month_tariff("2026-01", base, 0.5, history)
+    check("rmt_before_falls_back", t_jan is base and f_jan == 0.5)
+    t_feb, f_feb = analyze.resolve_month_tariff("2026-02", base, 0.5, history)
+    check("rmt_picks_effective", t_feb["import_rate"] == 20.0)
+    # Latest applicable entry wins, and per-entry feedin_ratio is honored
+    history2 = [
+        {"effective": "2026-01", "type": "flat", "import_rate": 12.0, "feedin_ratio": 0.3},
+        {"effective": "2026-02", "type": "flat", "import_rate": 20.0},
+    ]
+    t_mar, f_mar = analyze.resolve_month_tariff("2026-03", base, 0.5, history2)
+    check("rmt_latest_wins", t_mar["import_rate"] == 20.0)
+    t_j2, f_j2 = analyze.resolve_month_tariff("2026-01", base, 0.5, history2)
+    check("rmt_entry_feedin", f_j2 == 0.3)
+    check("rmt_falls_back_global_feedin", f_mar == 0.5)
+
+    # Bill impact: Jan billed at base 14, Feb at history 20
+    bi = analyze.compute_bill_impact(rows, base, 0.5, mt, history)
+    check("th_flag_on", bi["tariff_history_applied"] is True)
+    check("th_jan_rate", bi["monthly"]["2026-01"]["import_rate"] == 14.0)
+    check("th_feb_rate", bi["monthly"]["2026-02"]["import_rate"] == 20.0)
+    # Feb's higher rate means higher monthly without-solar cost than Jan per-day
+    feb = bi["monthly"]["2026-02"]
+    jan = bi["monthly"]["2026-01"]
+    check("th_feb_costlier",
+          feb["without_solar"] / feb["days"] > jan["without_solar"] / jan["days"])
+
+    # Annual projection ignores history (always current/base tariff)
+    bi_base = analyze.compute_bill_impact(rows, base, 0.5, mt)
+    check("th_annual_uses_current", bi["annual_savings"] == bi_base["annual_savings"])
+    check("th_no_history_flag_off", bi_base["tariff_history_applied"] is False)
+
 
 def test_roi():
     """Test ROI computation."""
@@ -779,6 +824,7 @@ def main():
     test_peak_demand()
     test_anomalies()
     test_bill_impact()
+    test_tariff_history()
     test_roi()
     test_trends()
     test_battery_health()

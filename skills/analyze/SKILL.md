@@ -44,7 +44,8 @@ If Codex is running in an environment where `AskUserQuestion` or equivalent stru
 4. **"What is your inverter capacity in kW?"** — User provides the AC output rating printed on the inverter / I don't know (estimate from PV size). If unknown, estimate as `pv_kwp / 1.3`.
 5. **"Do you have a battery?"** — Yes / No. If yes, ask: **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e. If no battery, skip battery-related analysis sections (3e, 3l, Battery Health, battery portions of anomaly detection).
 6. **"Is there room for additional panels?"** — No / Other (specify kWp)
-7. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). For all types, ask for the import rate per kWh. If tiered, also ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates.
+7. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). For all types, ask for the import rate per kWh. If tiered, also ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates. This is the **current** tariff.
+   - **7b (optional). "Did your rate change during the tracked months?"** — No / Yes (provide past rates). Only ask if there are CSV files spanning more than one month. If yes, collect one entry per rate change: the month it took effect (`YYYY-MM`) and that period's tariff (same shape as Q7 — type + import rate, plus tiers/TOU/feed-in if they differed). Put these in `tariff_history` (see below). Leave it out entirely if the rate has been constant — the analysis is identical without it.
 8. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest) and system age in years. Infer currency from the user's location (Q1). Derive the import rate from Q7. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
 9. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
 
@@ -69,6 +70,7 @@ Build a config JSON with these keys from the user's answers:
   "seasonal_factors": {"1": 1.07, ...},
   "grid_emission_factor": 0.68,
   "tariff": {"type": "flat", "import_rate": 14},
+  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 11}],
   "roi": {"total_cost": 400000, "battery_cost": 100000, "system_age_years": 0.25},
   "currency": "₱"
 }
@@ -84,6 +86,7 @@ Key notes:
 - `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`. `tariff.import_rate` comes from Q7.
 - For tiered: add `tariff.tiers: [{"threshold": 200, "rate": 10}, {"threshold": 400, "rate": 12}, ...]`
 - For TOU: add `tariff.tou: {"peak_hours": ["09:00", "10:00", ...], "peak_rate": 16, "offpeak_rate": 10}`
+- `tariff_history` (optional, from Q7b): a list of effective-dated past tariffs, each `{"effective": "YYYY-MM", "type": ..., "import_rate": ..., "tiers"?, "tou"?, "feedin_ratio"?}` (same shape as `tariff`). Each month's bill is computed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking **annual projection and ROI always use the current `tariff`**, so they reflect today's rate. Omit the key (or pass `[]`) when the rate never changed — the output is then identical. Entries may omit `feedin_ratio` to inherit the top-level `feedin_ratio`.
 - `roi.battery_cost`: cost of battery portion (only if `has_battery` is true); used for "without battery" ROI projection
 - `roi`: set to `null` if user declined ROI estimate
 
@@ -189,6 +192,7 @@ For each month, compute:
 - **Bill savings** = without_solar - with_solar + feed-in_credit
 - Report monthly and projected annual bill impact
 - For tiered tariffs, highlight the "tier reduction benefit" — solar may push consumption into a lower tier, providing savings beyond the raw kWh offset
+- **Historical tariffs**: when `tariff_history` is supplied, each month in `bill_impact.monthly` is already billed at the rate that applied that month (see `monthly[m].import_rate` / `monthly[m].tariff_type`), and `bill_impact.tariff_history_applied` is `true`. The annual projection and ROI use the current tariff. When presenting the monthly table, note that past months reflect their then-current rate, and (if `tariff_history_applied`) add a one-line caveat that the annual figure is projected at today's rate.
 
 #### 3j. ROI estimate (if requested)
 
@@ -285,7 +289,7 @@ Based on analysis of solar data from {month range} ({x} days).
 - **PV capacity**: {kWp} kWp, inverter: {inverter_kw} kW AC (DC/AC ratio: {ratio})
 - **Battery**: {nominal_kWh} kWh nominal, ~{usable_kWh} kWh usable (SOC range {min}%–{max}%)
 - **EV/PHEV**: {present or not, charge frequency}
-- **Tariff**: {flat / tiered / TOU} — {rate details}
+- **Tariff**: {flat / tiered / TOU} — {rate details}{If `bill_impact.tariff_history_applied`: ", current; past months billed at their then-current rate (see monthly table)"}
 - **Feed-in tariff**: {ratio}% of import rate
 
 ## Alerts
@@ -511,6 +515,7 @@ This section documents the heuristics, assumptions, and caveats used in the anal
 ### Financial Estimates
 - Tiered tariff calculations treat tier thresholds as cumulative. Utilities using non-cumulative block structures would require different logic.
 - Feed-in credit applies a flat rate regardless of TOU period. Time-differentiated feed-in tariffs are not modelled.
+- Past months are billed at the rate in effect that month when `tariff_history` is provided; otherwise the current tariff is applied to every month. The annual projection and ROI always use the current tariff.
 - ROI uses 0.5%/year panel degradation (industry standard for monocrystalline silicon). Does not model inverter replacement (~10-15 years), battery degradation beyond cycle count, or electricity price inflation.
 - Battery cycle life uses a 6,000-cycle LFP rating. Actual life varies by manufacturer, depth of discharge, temperature, and charge rate. Calendar aging is not modelled.
 

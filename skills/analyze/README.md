@@ -42,7 +42,7 @@ Each row represents one hour. A full day has 24 rows. Days with fewer than 21 ro
 - **Additional panels projection** — Marginal value of extra PV capacity
 - **Peak demand** — Maximum grid draw and PV output with timestamps
 - **Anomaly detection** — PV shortfalls (rolling 14-day baseline), load spikes (2-sigma), battery efficiency drops
-- **Bill impact** — Supports flat, tiered, and time-of-use tariff structures
+- **Bill impact** — Supports flat, tiered, and time-of-use tariff structures, plus optional effective-dated tariff history so past months are billed at the rate that applied then
 - **ROI** — Payback with 0.5%/year panel degradation, 25-year lifetime savings
 - **Trends** — Month-over-month changes with significance flags
 - **Battery health** — Cycle life estimation based on 6,000-cycle LFP rating
@@ -86,10 +86,13 @@ Config format:
   "seasonal_factors": {"1": 1.07, "2": 1.07, "6": 0.93},
   "grid_emission_factor": 0.5,
   "tariff": {"type": "flat", "import_rate": 0.15},
+  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 0.12}],
   "roi": {"total_cost": 15000, "system_age_years": 0.25},
   "currency": "$"
 }
 ```
+
+`tariff_history` is optional. Each entry is a full tariff object plus an `effective` month (`YYYY-MM`) and an optional `feedin_ratio`. A month is billed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking annual projection and ROI always use the current `tariff`. Omit the key (or pass `[]`) when the rate never changed — the output is then identical.
 
 ### `scripts/test_check.py`
 
