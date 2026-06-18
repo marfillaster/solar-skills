@@ -487,20 +487,20 @@ def test_tariff_history():
 
     # resolve_month_tariff: months before every entry fall back to base
     history = [{"effective": "2026-02", "type": "flat", "import_rate": 20.0}]
-    t_jan, f_jan = analyze.resolve_month_tariff("2026-01", base, 0.5, history)
-    check("rmt_before_falls_back", t_jan is base and f_jan == 0.5)
-    t_feb, f_feb = analyze.resolve_month_tariff("2026-02", base, 0.5, history)
+    t_jan, r_jan, fr_jan = analyze.resolve_month_tariff("2026-01", base, 0.5, None, history)
+    check("rmt_before_falls_back", t_jan is base and r_jan == 0.5 and fr_jan is None)
+    t_feb, r_feb, fr_feb = analyze.resolve_month_tariff("2026-02", base, 0.5, None, history)
     check("rmt_picks_effective", t_feb["import_rate"] == 20.0)
     # Latest applicable entry wins, and per-entry feedin_ratio is honored
     history2 = [
         {"effective": "2026-01", "type": "flat", "import_rate": 12.0, "feedin_ratio": 0.3},
         {"effective": "2026-02", "type": "flat", "import_rate": 20.0},
     ]
-    t_mar, f_mar = analyze.resolve_month_tariff("2026-03", base, 0.5, history2)
+    t_mar, r_mar, fr_mar = analyze.resolve_month_tariff("2026-03", base, 0.5, None, history2)
     check("rmt_latest_wins", t_mar["import_rate"] == 20.0)
-    t_j2, f_j2 = analyze.resolve_month_tariff("2026-01", base, 0.5, history2)
-    check("rmt_entry_feedin", f_j2 == 0.3)
-    check("rmt_falls_back_global_feedin", f_mar == 0.5)
+    t_j2, r_j2, fr_j2 = analyze.resolve_month_tariff("2026-01", base, 0.5, None, history2)
+    check("rmt_entry_feedin", r_j2 == 0.3)
+    check("rmt_falls_back_global_feedin", r_mar == 0.5)
 
     # Bill impact: Jan billed at base 14, Feb at history 20
     bi = analyze.compute_bill_impact(rows, base, 0.5, mt, history)
@@ -517,6 +517,39 @@ def test_tariff_history():
     bi_base = analyze.compute_bill_impact(rows, base, 0.5, mt)
     check("th_annual_uses_current", bi["annual_savings"] == bi_base["annual_savings"])
     check("th_no_history_flag_off", bi_base["tariff_history_applied"] is False)
+
+
+def test_feedin_rate():
+    """Absolute feedin_rate (currency/kWh) overrides the ratio everywhere."""
+    # feedin_credit_rate precedence
+    check("fcr_ratio", analyze.feedin_credit_rate(14.0, 0.5, None) == 7.0)
+    check("fcr_absolute", analyze.feedin_credit_rate(14.0, 0.5, 8.8) == 8.8)
+    check("fcr_zero_ratio", analyze.feedin_credit_rate(14.0, 0.0, None) == 0.0)
+
+    rows = enrich_all(make_dataset(30))
+    mt = analyze.compute_monthly_totals(rows)
+    tariff = {"type": "flat", "import_rate": 14.0}
+
+    # Bill credit uses the absolute rate, independent of import_rate
+    bi_abs = analyze.compute_bill_impact(rows, tariff, 0.5, mt, feedin_rate=8.8)
+    bi_ratio = analyze.compute_bill_impact(rows, tariff, 0.5, mt)  # ratio → 14*0.5 = 7.0
+    export = sum(r["Grid_Export_kWh"] for r in analyze.group_by(rows, analyze.row_month)["2026-01"])
+    m_abs = bi_abs["monthly"]["2026-01"]
+    check("fr_month_rate_reported", m_abs["feedin_rate"] == 8.8)
+    check("fr_credit_uses_absolute", abs(m_abs["feedin_credit"] - export * 8.8) < 1.0)
+    check("fr_absolute_beats_ratio",
+          bi_abs["monthly"]["2026-01"]["feedin_credit"]
+          > bi_ratio["monthly"]["2026-01"]["feedin_credit"])
+
+    # Per-entry feedin_rate in history; explicit ratio in a later entry clears it
+    hist = [
+        {"effective": "2026-01", "type": "flat", "import_rate": 14.0, "feedin_rate": 8.8},
+        {"effective": "2026-02", "type": "flat", "import_rate": 15.0, "feedin_ratio": 0.5},
+    ]
+    t1, r1, fr1 = analyze.resolve_month_tariff("2026-01", tariff, 0.5, None, hist)
+    check("fr_entry_absolute", fr1 == 8.8)
+    t2, r2, fr2 = analyze.resolve_month_tariff("2026-02", tariff, 0.5, 8.8, hist)
+    check("fr_entry_ratio_clears_rate", r2 == 0.5 and fr2 is None)
 
 
 def test_roi():
@@ -825,6 +858,7 @@ def main():
     test_anomalies()
     test_bill_impact()
     test_tariff_history()
+    test_feedin_rate()
     test_roi()
     test_trends()
     test_battery_health()

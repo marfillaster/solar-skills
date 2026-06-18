@@ -81,18 +81,18 @@ Config format:
   "inverter_kw": 8.0,
   "battery_nominal_kwh": 14.336,
   "has_ev": true,
-  "feedin_ratio": 0.5,
+  "feedin_rate": 0.075,
   "additional_kwp": 0,
   "seasonal_factors": {"1": 1.07, "2": 1.07, "6": 0.93},
   "grid_emission_factor": 0.5,
   "tariff": {"type": "flat", "import_rate": 0.15},
-  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 0.12}],
+  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 0.12, "feedin_rate": 0}],
   "roi": {"total_cost": 15000, "system_age_years": 0.25},
   "currency": "$"
 }
 ```
 
-`tariff_history` is optional. Each entry is a full tariff object plus an `effective` month (`YYYY-MM`) and an optional `feedin_ratio`. A month is billed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking annual projection and ROI always use the current `tariff`. Omit the key (or pass `[]`) when the rate never changed — the output is then identical.
+Feed-in can be given as `feedin_rate` (absolute credit per exported kWh, same currency as `import_rate`) or `feedin_ratio` (fraction of the import rate); `feedin_rate` wins if both are present. `tariff_history` is optional — each entry is a full tariff object plus an `effective` month (`YYYY-MM`) and its own optional `feedin_rate`/`feedin_ratio`. A month is billed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking annual projection and ROI always use the current `tariff`. Omit the key (or pass `[]`) when the rate never changed — the output is then identical.
 
 ### `scripts/test_check.py`
 

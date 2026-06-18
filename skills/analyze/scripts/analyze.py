@@ -12,6 +12,9 @@ Input: JSON config on stdin or as file argument with keys:
     battery_nominal_kwh float   Battery nominal capacity in kWh
     has_ev              bool    Whether household has EV/PHEV
     feedin_ratio        float   Feed-in tariff as ratio of import rate (0 = no feed-in, 0.5 = typical)
+    feedin_rate         float   Optional absolute feed-in credit per kWh (same currency as
+                                import_rate). Overrides feedin_ratio when set. Per-entry
+                                feedin_rate is also allowed inside tariff_history.
     additional_kwp      float   Additional panel capacity (0 if none)
     seasonal_factors    dict    Month number (str) -> adjustment factor
     grid_emission_factor float  kg CO2/kWh for the user's grid
@@ -563,7 +566,8 @@ def compute_battery_analysis(rows, nominal_kwh, ev_days, non_ev_days):
     }
 
 
-def compute_additional_panels(rows, current_kwp, additional_kwp, feedin_ratio, import_rate):
+def compute_additional_panels(rows, current_kwp, additional_kwp, feedin_ratio, import_rate,
+                              feedin_rate=None):
     """3f. Additional panels projection.
 
     Note:
@@ -603,7 +607,7 @@ def compute_additional_panels(rows, current_kwp, additional_kwp, feedin_ratio, i
         "extra_exported_daily": round(extra_exported / num_days, 1) if num_days else 0,
         "extra_daily_savings": round(
             (extra_self_consumed / num_days * import_rate
-             + extra_exported / num_days * import_rate * feedin_ratio)
+             + extra_exported / num_days * feedin_credit_rate(import_rate, feedin_ratio, feedin_rate))
             if num_days else 0, 1
         ),
     }
@@ -744,14 +748,31 @@ def compute_anomalies(rows, ev_days, non_ev_days):
     }
 
 
-def resolve_month_tariff(month, base_tariff, base_feedin, tariff_history):
+def feedin_credit_rate(import_rate, feedin_ratio=0.0, feedin_rate=None):
+    """Absolute feed-in credit per exported kWh (currency/kWh).
+
+    An explicit ``feedin_rate`` (absolute) takes precedence; otherwise the credit
+    is ``import_rate * feedin_ratio``. Use this everywhere export revenue is
+    valued so the two ways of expressing feed-in stay consistent.
+    """
+    if feedin_rate is not None:
+        return feedin_rate
+    return import_rate * (feedin_ratio or 0.0)
+
+
+def resolve_month_tariff(month, base_tariff, base_feedin_ratio, base_feedin_rate, tariff_history):
     """Pick the tariff in effect for a ``YYYY-MM`` month.
 
     ``tariff_history`` is an optional list of effective-dated overrides, each a
-    full tariff object plus ``effective`` (``YYYY-MM``) and an optional
-    ``feedin_ratio``. The entry with the latest ``effective`` that is <= ``month``
-    wins; months earlier than every entry fall back to ``base_tariff`` /
-    ``base_feedin`` (the current tariff). Returns ``(tariff, feedin_ratio)``.
+    full tariff object plus ``effective`` (``YYYY-MM``) and an optional feed-in
+    spec — ``feedin_rate`` (absolute) and/or ``feedin_ratio``. The entry with the
+    latest ``effective`` that is <= ``month`` wins; months earlier than every
+    entry fall back to ``base_tariff`` and the base feed-in (the current tariff).
+
+    Returns ``(tariff, feedin_ratio, feedin_rate)``. An entry that sets either
+    feed-in field defines its own feed-in (an explicit ``feedin_ratio`` clears the
+    inherited absolute rate, and vice versa); an entry with neither inherits both
+    base values.
     """
     chosen = None
     for entry in tariff_history or []:
@@ -759,16 +780,22 @@ def resolve_month_tariff(month, base_tariff, base_feedin, tariff_history):
         if eff and eff <= month and (chosen is None or eff > chosen.get("effective", "")):
             chosen = entry
     if chosen is None:
-        return base_tariff, base_feedin
-    return chosen, chosen.get("feedin_ratio", base_feedin)
+        return base_tariff, base_feedin_ratio, base_feedin_rate
+    if "feedin_rate" in chosen:
+        return chosen, chosen.get("feedin_ratio", base_feedin_ratio), chosen["feedin_rate"]
+    if "feedin_ratio" in chosen:
+        return chosen, chosen["feedin_ratio"], None
+    return chosen, base_feedin_ratio, base_feedin_rate
 
 
-def _bill_for_month(mrows, total_load, grid_import, grid_export, tariff, feedin_ratio):
+def _bill_for_month(mrows, total_load, grid_import, grid_export, tariff,
+                    feedin_ratio, feedin_rate=None):
     """Cost of one month's import with/without solar, plus feed-in credit.
 
     Assumption (tiered): tier thresholds are cumulative (each tier covers
-    threshold[i] - threshold[i-1] kWh). Caveat (feed-in credit): a flat rate
-    (import_rate * feedin_ratio) is applied regardless of TOU period.
+    threshold[i] - threshold[i-1] kWh). Caveat (feed-in credit): a flat per-kWh
+    rate (absolute ``feedin_rate`` or ``import_rate * feedin_ratio``) is applied
+    regardless of TOU period.
     """
     tariff_type = tariff.get("type", "flat")
     import_rate = tariff.get("import_rate", 0)
@@ -819,18 +846,20 @@ def _bill_for_month(mrows, total_load, grid_import, grid_export, tariff, feedin_
         without_solar = calc_flat(total_load)
         with_solar = calc_flat(grid_import)
 
-    feedin_credit = grid_export * import_rate * feedin_ratio  # CAVEAT: flat rate, ignores TOU
+    # CAVEAT: flat per-kWh rate, ignores TOU period
+    feedin_credit = grid_export * feedin_credit_rate(import_rate, feedin_ratio, feedin_rate)
     return without_solar, with_solar, feedin_credit
 
 
-def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_history=None):
+def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals,
+                        tariff_history=None, feedin_rate=None):
     """3i. Bill impact estimate.
 
     Each month is costed at the tariff in effect that month (``tariff_history``,
     optional). The forward-looking annual projection always uses the current
-    ``tariff`` / ``feedin_ratio``, so it reflects today's rates regardless of
-    history. With no ``tariff_history`` the two coincide and the output is
-    unchanged.
+    ``tariff`` and base feed-in (``feedin_ratio`` / absolute ``feedin_rate``), so
+    it reflects today's rates regardless of history. With no ``tariff_history``
+    the two coincide and the output is unchanged.
 
     See ``_bill_for_month`` for the tiered/feed-in assumptions.
     """
@@ -847,13 +876,14 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_histo
         grid_export = sum(r["Grid_Export_kWh"] for r in mrows)
         days = monthly_totals[m]["days"] if m in monthly_totals else 30
 
-        m_tariff, m_feedin = resolve_month_tariff(m, tariff, feedin_ratio, tariff_history)
+        m_tariff, m_ratio, m_rate = resolve_month_tariff(
+            m, tariff, feedin_ratio, feedin_rate, tariff_history)
         if m_tariff is not tariff:
             history_applied = True
 
         # Historical (as-billed) figures for this month.
         without_solar, with_solar, feedin_credit = _bill_for_month(
-            mrows, total_load, grid_import, grid_export, m_tariff, m_feedin)
+            mrows, total_load, grid_import, grid_export, m_tariff, m_ratio, m_rate)
         net_savings = without_solar - with_solar + feedin_credit
 
         monthly_bill[m] = {
@@ -864,11 +894,13 @@ def compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_histo
             "days": days,
             "tariff_type": m_tariff.get("type", "flat"),
             "import_rate": m_tariff.get("import_rate", 0),
+            "feedin_rate": round(feedin_credit_rate(
+                m_tariff.get("import_rate", 0), m_ratio, m_rate), 4),
         }
 
         # Current-tariff figures for the annual projection basis.
         c_without, c_with, c_credit = _bill_for_month(
-            mrows, total_load, grid_import, grid_export, tariff, feedin_ratio)
+            mrows, total_load, grid_import, grid_export, tariff, feedin_ratio, feedin_rate)
         cur_without += c_without
         cur_with += c_with
         cur_credit += c_credit
@@ -1167,6 +1199,7 @@ def main():
     nominal_kwh = config["battery_nominal_kwh"]
     has_ev = config.get("has_ev", False)
     feedin_ratio = config.get("feedin_ratio", 0.0)
+    feedin_rate = config.get("feedin_rate")  # absolute currency/kWh; overrides ratio when set
     additional_kwp = config.get("additional_kwp", 0)
     seasonal_factors = config.get("seasonal_factors", {str(m): 1.0 for m in range(1, 13)})
     grid_emission_factor = config.get("grid_emission_factor", 0.5)
@@ -1206,7 +1239,7 @@ def main():
 
     # 3f
     panels = compute_additional_panels(
-        rows, pv_kwp, additional_kwp, feedin_ratio, tariff.get("import_rate", 0)
+        rows, pv_kwp, additional_kwp, feedin_ratio, tariff.get("import_rate", 0), feedin_rate
     )
 
     # 3g
@@ -1216,7 +1249,8 @@ def main():
     anomalies = compute_anomalies(rows, ev_days, non_ev_days)
 
     # 3i
-    bill_impact = compute_bill_impact(rows, tariff, feedin_ratio, monthly_totals, tariff_history)
+    bill_impact = compute_bill_impact(
+        rows, tariff, feedin_ratio, monthly_totals, tariff_history, feedin_rate)
 
     # 3j
     roi = compute_roi(bill_impact, roi_config)

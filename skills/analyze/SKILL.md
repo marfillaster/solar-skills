@@ -47,7 +47,7 @@ If Codex is running in an environment where `AskUserQuestion` or equivalent stru
 7. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). For all types, ask for the import rate per kWh. If tiered, also ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates. This is the **current** tariff.
    - **Before asking, load the saved tariff** (see "Tariff persistence" below). If a saved rate exists, hint it as the first option — e.g. `"Use saved: flat ₱20/kWh (current since 2026-03)"` — so the user can reuse it in one tap, alongside the structure choices for entering a different rate. This is the same question as always, just pre-filled with what was used last time. If the user picks a **different** rate, that is a rate change — capture it per "Tariff persistence" so past months keep their old rate.
 8. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest) and system age in years. Infer currency from the user's location (Q1). Derive the import rate from Q7. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
-9. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
+9. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Exact rate per kWh (specify the absolute export credit) / Other (specify ratio). Prefer the **absolute rate** when the user knows their ₱/kWh export credit — store it as `feedin_rate` (see below); use a ratio only when that's how they think of it.
 
 #### 2.1 Tariff persistence
 
@@ -58,20 +58,22 @@ that env var is set, otherwise `data/tariff_history.json`. Shape:
 
 ```json
 {
-  "feedin_ratio": 0.5,
+  "import_rate": 20,
+  "feedin_rate": 8.8,
   "history": [
-    {"effective": "2025-12", "type": "flat", "import_rate": 14},
-    {"effective": "2026-03", "type": "flat", "import_rate": 20}
+    {"effective": "2025-12", "type": "flat", "import_rate": 14, "feedin_rate": 0},
+    {"effective": "2026-03", "type": "flat", "import_rate": 20, "feedin_rate": 8.8}
   ]
 }
 ```
 
-- `history` is sorted by `effective` (`YYYY-MM`); the **last** entry is the current tariff. Each entry has the same shape as `tariff` (type + import_rate, plus `tiers`/`tou`), and may carry its own `feedin_ratio` if feed-in changed that period.
-- **On load (before Q7/Q9):** read the file. If it exists, the last entry is the saved/current tariff — hint it in Q7, and hint its `feedin_ratio` (or the top-level one) in Q9.
+- `history` is sorted by `effective` (`YYYY-MM`); the **last** entry is the current tariff. Each entry has the same shape as `tariff` (type + import_rate, plus `tiers`/`tou`), and carries its own feed-in: prefer `feedin_rate` (absolute ₱/kWh export credit), or `feedin_ratio` (fraction of import rate) when the user thinks in ratios. `feedin_rate` wins if both are present.
+- The top-level `feedin_rate`/`feedin_ratio` (and `import_rate`) mirror the current/last entry — they are what the forward-looking annual projection and ROI use.
+- **On load (before Q7/Q9):** read the file. If it exists, the last entry is the saved/current tariff — hint it in Q7, and hint its feed-in (`feedin_rate` ₱/kWh, else `feedin_ratio`) in Q9.
 - **No file yet:** ask Q7/Q9 normally. After the run, create the file with a single entry whose `effective` is the **earliest tracked CSV month** (so it covers all data).
 - **User keeps the saved rate:** leave the file unchanged.
 - **User enters a different rate (a change):** ask **"From which month does the new rate apply?"** — hint the current calendar month, accept any `YYYY-MM`. Append `{"effective": <that month>, ...new tariff}` to `history` and write the file back. The previous entry stays, so earlier months keep the old rate.
-- Then build the analysis config from the file: `tariff` = the last entry, `tariff_history` = the whole `history` list, `feedin_ratio` = top-level (or from the last entry).
+- Then build the analysis config from the file: `tariff` = the last entry, `tariff_history` = the whole `history` list, and the top-level feed-in → config `feedin_rate` (absolute) and/or `feedin_ratio`.
 
 This file is persistent state — do **not** delete it in the cleanup step.
 
@@ -91,12 +93,12 @@ Build a config JSON with these keys from the user's answers:
   "has_battery": true,
   "battery_nominal_kwh": 14.336,
   "has_ev": true,
-  "feedin_ratio": 0.5,
+  "feedin_rate": 8.8,
   "additional_kwp": 0,
   "seasonal_factors": {"1": 1.07, ...},
   "grid_emission_factor": 0.68,
   "tariff": {"type": "flat", "import_rate": 14},
-  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 11}],
+  "tariff_history": [{"effective": "2025-12", "type": "flat", "import_rate": 11, "feedin_rate": 0}],
   "roi": {"total_cost": 400000, "battery_cost": 100000, "system_age_years": 0.25},
   "currency": "₱"
 }
@@ -112,7 +114,8 @@ Key notes:
 - `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`. `tariff.import_rate` comes from Q7. This is the **current** tariff = the last entry of the persisted `history` (see 2.1).
 - For tiered: add `tariff.tiers: [{"threshold": 200, "rate": 10}, {"threshold": 400, "rate": 12}, ...]`
 - For TOU: add `tariff.tou: {"peak_hours": ["09:00", "10:00", ...], "peak_rate": 16, "offpeak_rate": 10}`
-- `tariff_history`: the persisted `history` list (see 2.1), each entry `{"effective": "YYYY-MM", "type": ..., "import_rate": ..., "tiers"?, "tou"?, "feedin_ratio"?}` (same shape as `tariff`). Each month's bill is computed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking **annual projection and ROI always use the current `tariff`**, so they reflect today's rate. Pass `[]` (or omit) only when no tariff was ever saved — output is then identical to a single flat rate. Entries may omit `feedin_ratio` to inherit the top-level `feedin_ratio`.
+- `feedin_ratio` / `feedin_rate`: feed-in valuation from Q9. `feedin_rate` is the **absolute export credit per kWh** (same currency as `import_rate`) and is preferred when the user knows it; `feedin_ratio` is a fraction of the import rate. If both are set, `feedin_rate` wins. Top-level values are the current ones (used for the annual projection and ROI).
+- `tariff_history`: the persisted `history` list (see 2.1), each entry `{"effective": "YYYY-MM", "type": ..., "import_rate": ..., "tiers"?, "tou"?, "feedin_rate"? | "feedin_ratio"?}` (same shape as `tariff`). Each month's bill is computed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking **annual projection and ROI always use the current `tariff`**, so they reflect today's rate. Pass `[]` (or omit) only when no tariff was ever saved — output is then identical to a single flat rate. An entry may carry its own `feedin_rate`/`feedin_ratio`; an entry with neither inherits the top-level feed-in. Per-month results expose `feedin_rate` (the absolute ₱/kWh applied).
 - `roi.battery_cost`: cost of battery portion (only if `has_battery` is true); used for "without battery" ROI projection
 - `roi`: set to `null` if user declined ROI estimate
 
