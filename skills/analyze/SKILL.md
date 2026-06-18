@@ -45,9 +45,35 @@ If Codex is running in an environment where `AskUserQuestion` or equivalent stru
 5. **"Do you have a battery?"** — Yes / No. If yes, ask: **"What is your battery capacity?"** — Provide in kWh (e.g. 13.3 kWh) / Provide as voltage + Ah (e.g. 51.2V × 280Ah). If voltage+Ah, compute: `kWh = voltage × Ah / 1000`. This is the **nominal** capacity; usable capacity is estimated from data in step 3e. If no battery, skip battery-related analysis sections (3e, 3l, Battery Health, battery portions of anomaly detection).
 6. **"Is there room for additional panels?"** — No / Other (specify kWp)
 7. **"What is your tariff structure?"** — Flat rate / Tiered/block rate (price increases with consumption) / Time-of-use (different rates by time of day). For all types, ask for the import rate per kWh. If tiered, also ask for tier thresholds and rates. If TOU, ask for peak/off-peak hours and rates. This is the **current** tariff.
-   - **7b (optional). "Did your rate change during the tracked months?"** — No / Yes (provide past rates). Only ask if there are CSV files spanning more than one month. If yes, collect one entry per rate change: the month it took effect (`YYYY-MM`) and that period's tariff (same shape as Q7 — type + import rate, plus tiers/TOU/feed-in if they differed). Put these in `tariff_history` (see below). Leave it out entirely if the rate has been constant — the analysis is identical without it.
+   - **Before asking, load the saved tariff** (see "Tariff persistence" below). If a saved rate exists, hint it as the first option — e.g. `"Use saved: flat ₱20/kWh (current since 2026-03)"` — so the user can reuse it in one tap, alongside the structure choices for entering a different rate. This is the same question as always, just pre-filled with what was used last time. If the user picks a **different** rate, that is a rate change — capture it per "Tariff persistence" so past months keep their old rate.
 8. **"Do you want an ROI estimate?"** — No / Yes (if yes, ask for: total setup cost (hint: if financed/loaned, include total financing cost such as interest) and system age in years. Infer currency from the user's location (Q1). Derive the import rate from Q7. If the system has a battery, also ask: **"What was the battery cost (included in total)?"** — this is needed to project ROI without battery.)
 9. **"What is your feed-in tariff arrangement?"** — No feed-in (I don't get paid for export) / Feed-in at ~50% of import rate (Typical) / Other (specify ratio)
+
+#### 2.1 Tariff persistence
+
+The tariff (and any rate changes over time) is remembered between runs in
+`data/tariff_history.json` so Q7/Q9 can pre-fill the last value and past months
+keep the rate that applied then. Use `$SOLAR_DATA_DIR/tariff_history.json` if
+that env var is set, otherwise `data/tariff_history.json`. Shape:
+
+```json
+{
+  "feedin_ratio": 0.5,
+  "history": [
+    {"effective": "2025-12", "type": "flat", "import_rate": 14},
+    {"effective": "2026-03", "type": "flat", "import_rate": 20}
+  ]
+}
+```
+
+- `history` is sorted by `effective` (`YYYY-MM`); the **last** entry is the current tariff. Each entry has the same shape as `tariff` (type + import_rate, plus `tiers`/`tou`), and may carry its own `feedin_ratio` if feed-in changed that period.
+- **On load (before Q7/Q9):** read the file. If it exists, the last entry is the saved/current tariff — hint it in Q7, and hint its `feedin_ratio` (or the top-level one) in Q9.
+- **No file yet:** ask Q7/Q9 normally. After the run, create the file with a single entry whose `effective` is the **earliest tracked CSV month** (so it covers all data).
+- **User keeps the saved rate:** leave the file unchanged.
+- **User enters a different rate (a change):** ask **"From which month does the new rate apply?"** — hint the current calendar month, accept any `YYYY-MM`. Append `{"effective": <that month>, ...new tariff}` to `history` and write the file back. The previous entry stays, so earlier months keep the old rate.
+- Then build the analysis config from the file: `tariff` = the last entry, `tariff_history` = the whole `history` list, `feedin_ratio` = top-level (or from the last entry).
+
+This file is persistent state — do **not** delete it in the cleanup step.
 
 ### 3. Run analysis
 
@@ -83,10 +109,10 @@ Key notes:
 - `battery_nominal_kwh`: if user gave voltage + Ah, compute `voltage * Ah / 1000`
 - `seasonal_factors`: infer from user's location/climate (see 3m below for factor tables)
 - `grid_emission_factor`: infer from user's location (see 3o below for reference values)
-- `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`. `tariff.import_rate` comes from Q7.
+- `tariff.type`: `"flat"`, `"tiered"`, or `"tou"`. `tariff.import_rate` comes from Q7. This is the **current** tariff = the last entry of the persisted `history` (see 2.1).
 - For tiered: add `tariff.tiers: [{"threshold": 200, "rate": 10}, {"threshold": 400, "rate": 12}, ...]`
 - For TOU: add `tariff.tou: {"peak_hours": ["09:00", "10:00", ...], "peak_rate": 16, "offpeak_rate": 10}`
-- `tariff_history` (optional, from Q7b): a list of effective-dated past tariffs, each `{"effective": "YYYY-MM", "type": ..., "import_rate": ..., "tiers"?, "tou"?, "feedin_ratio"?}` (same shape as `tariff`). Each month's bill is computed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking **annual projection and ROI always use the current `tariff`**, so they reflect today's rate. Omit the key (or pass `[]`) when the rate never changed — the output is then identical. Entries may omit `feedin_ratio` to inherit the top-level `feedin_ratio`.
+- `tariff_history`: the persisted `history` list (see 2.1), each entry `{"effective": "YYYY-MM", "type": ..., "import_rate": ..., "tiers"?, "tou"?, "feedin_ratio"?}` (same shape as `tariff`). Each month's bill is computed at the latest entry whose `effective` is ≤ that month; months before every entry use the current `tariff`. The forward-looking **annual projection and ROI always use the current `tariff`**, so they reflect today's rate. Pass `[]` (or omit) only when no tariff was ever saved — output is then identical to a single flat rate. Entries may omit `feedin_ratio` to inherit the top-level `feedin_ratio`.
 - `roi.battery_cost`: cost of battery portion (only if `has_battery` is true); used for "without battery" ROI projection
 - `roi`: set to `null` if user declined ROI estimate
 
@@ -562,4 +588,4 @@ This report was generated by an AI model. While the numerical computations are p
 
 - Show the report to the user
 - Write it to `data/solar-analysis.md`
-- Clean up `data/analysis_config.json`
+- Clean up `data/analysis_config.json` (but keep `data/tariff_history.json` — it is persistent state)
