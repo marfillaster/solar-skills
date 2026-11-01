@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-chrome_fetch.py — SolisCloud Chrome fallback bulk fetcher
+chrome_fetch.py — SolisCloud browser fallback bulk fetcher
 
 The SolisCloud web UI signs every request with a per-request HMAC-SHA1 over the
 request body's Content-MD5 (canonical string: METHOD\nContent-MD5\nContent-Type\n
@@ -28,9 +28,14 @@ Stdin JSON format (when providing fresh auth):
   }
   (Legacy: a "body_template" object is still accepted and its "id" used as station.)
 
-To obtain the cookie: in the browser, trigger one Operating-Data chart request,
-call get_network_request on it, and copy the value after "token=" in its Cookie
-header. Auth is cached to data/.soliscloud_auth.json for CACHE_TTL_HOURS.
+To obtain the cookie, from a browser logged into SolisCloud:
+  - cmux agent browser (preferred): read it straight from the cookie store,
+    `cmux --json browser <surface> cookies get --all` → the cookie named "token".
+    (cmux's WKWebView has no network-request inspection, so cookie store it is.)
+  - Chrome DevTools MCP: trigger one Operating-Data chart request, call
+    get_network_request on it, and copy the value after "token=" in its Cookie
+    header.
+Auth is cached to data/.soliscloud_auth.json for CACHE_TTL_HOURS.
 """
 
 import base64

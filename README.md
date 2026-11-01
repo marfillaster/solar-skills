@@ -16,7 +16,7 @@ Most solar monitoring apps show you charts but don't tell you what to *do*. This
 
 Exports monthly 5-minute interval data from a SolisCloud-monitored solar+battery system and aggregates it into hourly CSV files.
 
-- **Two export methods:** API (primary, ~15s/month) or Chrome browser automation (fallback)
+- **Two export methods:** API (primary, ~15s/month) or browser automation (fallback — cmux agent browser preferred, Chrome DevTools MCP otherwise)
 - **Pure Python stdlib** — no pip dependencies for the API method
 - Outputs standardized CSV with PV, battery, grid, load, and SOC columns
 
@@ -141,11 +141,18 @@ Use $export-hourly-deye to export my Deye/Solarman data for 2026-02.
 Use $analyze to analyze my solar CSV data and produce a report.
 ```
 
-Codex note: `$export-hourly-soliscloud` can use direct API credentials, but its browser fallback depends on the Chrome DevTools MCP plugin being installed and available. If you do not have SolisCloud API credentials configured, make sure the DevTools MCP integration is set up before relying on the fallback path.
+Codex note: `$export-hourly-soliscloud` can use direct API credentials, but its browser fallback needs a browser backend. If you do not have SolisCloud API credentials configured, set one up before relying on the fallback path.
 
-Cross-agent note: install and configure the Chrome DevTools MCP plugin in the specific agent environment that will run the skill. If you use both Claude Code and Codex, or if work may be delegated to another agent/session, each runtime that needs the fallback path must have access to the DevTools MCP integration.
+Cross-agent note: the browser backend must be available in the specific agent environment that runs the skill. If you use both Claude Code and Codex, or if work may be delegated to another agent/session, each runtime that needs the fallback path needs its own access.
 
-Example install commands for the fallback browser path:
+**Preferred backend — cmux agent browser.** If [cmux](https://cmux.com) is installed and its browser panel is enabled, the skill uses it automatically. Nothing to install per agent: the skill drives it through the `cmux browser` CLI from Bash, so it works the same in Claude Code, Codex, or any agent with shell access.
+
+```bash
+command -v cmux && cmux browser-status   # expect: enabled
+cmux enable-browser                      # if it reports disabled
+```
+
+**Fallback backend — Chrome DevTools MCP**, used only when cmux is unavailable:
 
 ```bash
 # Claude Code
@@ -208,7 +215,7 @@ solar-skills/
         ├── README.md             # Detailed documentation
         └── scripts/
             ├── api_export.py     # API-based export (pure stdlib)
-            └── chrome_fetch.py   # Chrome fallback bulk fetcher (captures auth via DevTools MCP, fetches via Python)
+            └── chrome_fetch.py   # Browser fallback bulk fetcher (auth from cmux or DevTools MCP, fetches via Python)
 ```
 
 ## Requirements
@@ -225,7 +232,7 @@ Any Claude Code authentication method works (Pro/Max subscription or API key). T
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-The Chrome fallback requires the [Chrome DevTools MCP plugin](https://github.com/ChromeDevTools/chrome-devtools-mcp) to be installed and configured in Claude Code.
+The browser fallback needs one of two backends. It prefers the **cmux agent browser** ([cmux](https://cmux.com), browser panel enabled — check with `cmux browser-status`), which is driven entirely from Bash via `cmux browser` and needs no MCP server. When cmux is not available it falls back to the [Chrome DevTools MCP plugin](https://github.com/ChromeDevTools/chrome-devtools-mcp), installed and configured in Claude Code.
 
 ## CSV Format
 
