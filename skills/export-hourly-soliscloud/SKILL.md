@@ -1,8 +1,8 @@
 ---
 name: export-hourly-soliscloud
 description: Use when the user asks to export SolisCloud solar data, download solar metrics, get power station data, create hourly solar summary, or mentions SolisCloud export/download. Supports monthly bulk export.
-version: 4.1.0
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests, mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request
+version: 4.2.0
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests, mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool
 ---
 
 # SolisCloud Monthly Export
@@ -11,7 +11,7 @@ Export a full month of operating data from SolisCloud and produce a single hourl
 
 Two export methods are available:
 - **API export** (primary) — direct REST API calls, no browser needed
-- **Browser export** (fallback) — browser automation, via the **cmux agent browser** when it is available, otherwise the Chrome DevTools MCP tools
+- **Browser export** (fallback) — browser automation, via the **cmux agent browser** when it is available, otherwise the Chrome DevTools MCP tools, otherwise **Claude in Chrome**
 
 ## Arguments
 
@@ -125,7 +125,11 @@ Date,Hour,Readings,Avg_PV_W,PV_Energy_kWh,Avg_Battery_W,Battery_Energy_kWh,Avg_G
 
 ## Browser Fallback Path
 
-The fallback needs exactly two things from a logged-in browser session: the **station ID** and the httpOnly **`token` session cookie**. Everything else is re-signed in Python by `chrome_fetch.py`.
+The fallback needs exactly two things from a logged-in browser session: the **station ID** and the httpOnly **`token` session cookie**. Everything else is re-signed in Python by `chrome_fetch.py`. (Path C never sees the cookie: the page sends the signed requests itself.)
+
+The station ID is saved in `data/.soliscloud_auth.json` and stays usable after the cookie expires, so once any run has succeeded, the browser steps can skip finding it: leave `station_id` out of the stdin JSON (Paths A and B) or `--station-id` off (Path C).
+
+The cached cookie expires after 4 hours (`CACHE_TTL_HOURS`), so a monthly run will usually need a fresh browser login. API credentials are the only route that runs unattended.
 
 ### 3B. Check auth cache
 
@@ -140,18 +144,22 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py TARGET_MONTH
 
 ### 3B-2. Pick a browser backend  *(skip if cache was valid)*
 
-**Prefer the cmux agent browser** whenever it is available; only fall back to Chrome DevTools MCP when it is not.
+**Prefer the cmux agent browser** whenever it is available, then Chrome DevTools MCP, then Claude in Chrome. cmux is detected from Bash:
 
 ```bash
 if command -v cmux >/dev/null 2>&1 && [ "$(cmux browser-status 2>/dev/null)" = "enabled" ]; then
   echo cmux
 else
-  echo chrome-mcp
+  echo no-cmux
 fi
 ```
 
+The other two are MCP tools, so check which tools this session has (including deferred tools listed by name):
+
 - `cmux` → follow **Path A (cmux)** below, steps 4B‑A – 7B‑A.
-- `chrome-mcp` → follow **Path B (Chrome DevTools MCP)** below, steps 4B‑B – 7B‑B. If neither is available, stop and tell the user to either configure API credentials or install one of the two browsers.
+- `mcp__plugin_chrome-devtools-mcp_chrome-devtools__*` tools present → follow **Path B (Chrome DevTools MCP)**, steps 4B‑B – 7B‑B.
+- `mcp__claude-in-chrome__*` tools present → follow **Path C (Claude in Chrome)**, steps 4B‑C – 7B‑C. It cannot read the httpOnly cookie or request headers, so it uses the relay mode instead of cookie capture.
+- None of these → stop and tell the user to either configure API credentials or install one of the three browsers.
 
 ---
 
@@ -179,7 +187,7 @@ If the snapshot shows a login form rather than the dashboard, ask the user via A
 
 Once they reply, re-run `snapshot --interactive` (or `wait --url-contains`) to confirm the dashboard or plant list is visible before proceeding.
 
-### 5B-A. Get the station ID
+### 5B-A. Get the station ID  *(skip if the auth cache holds one, and drop `station_id` from the JSON in 6B-A)*
 
 ```bash
 cmux browser <S> goto https://www.soliscloud.com/overview/plantStation --snapshot-after
@@ -270,6 +278,72 @@ EOF
 ```
 
 Fill in the cookie from the captured request's `Cookie` header and the station ID from the plant details URL or captured body `id`. The script re-signs every request, fetches every day in `TARGET_MONTH`, saves auth to `data/.soliscloud_auth.json`, and writes `data/solar_hourly_TARGET_MONTH.csv`.
+
+---
+
+## Path C — Claude in Chrome  *(only when cmux and Chrome DevTools MCP are unavailable)*
+
+The extension can neither read the httpOnly `token` cookie (page JS can't, and it does not expose request headers) nor capture a request's `Cookie` header. So the page does the fetching: `chrome_fetch.py --serve` runs a one-shot listener on `127.0.0.1` that hands the page freshly signed requests and takes back the raw responses. The browser attaches the login cookie itself; the cookie never leaves Chrome. This path does not refresh the auth cache.
+
+If the `mcp__claude-in-chrome__*` tools are deferred, load them in one ToolSearch call: `tabs_context_mcp`, `tabs_create_mcp`, `tabs_close_mcp`, `navigate`, `computer`, `find`, `javascript_tool`.
+
+### 4B-C. Open SolisCloud and confirm login
+
+- Call `tabs_context_mcp` (with `createIfEmpty: true`), then `tabs_create_mcp` for a fresh tab, and `navigate` it to `https://www.soliscloud.com/overview/plantStation`.
+- Take a `computer` screenshot. If it shows the login page, ask the user via AskUserQuestion:
+
+  > **Please log into SolisCloud in the Chrome tab I opened (in the Claude tab group), then reply here to continue.**
+
+- Once they reply, `navigate` to the plant list URL again and screenshot to confirm it loads.
+
+### 5B-C. Get the station ID  *(skip if the auth cache holds one)*
+
+- `find` the plant name in the first row of the Plant List table and click it. Plant details open in a **new tab**: call `tabs_context_mcp` and take the 19-digit number from the URL containing `/details/overview/`. Store as `STATION_ID`.
+- Don't navigate to `/details/overview/<id>` directly: it returns the site's 404 page even when logged in. Stay on a SolisCloud page for step 7B-C.
+
+### 6B-C. Start the relay
+
+Run in the background (Bash `run_in_background: true`), from the project root:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/chrome_fetch.py TARGET_MONTH --serve [--station-id STATION_ID]
+```
+
+Wait for its `Relay listening on http://127.0.0.1:8765` line before the next step. Add `--port N` if 8765 is taken, and use the same port in the snippet below.
+
+### 7B-C. Have the page fetch every day
+
+Run this with `javascript_tool` on the SolisCloud tab, substituting the port if you changed it:
+
+```js
+(async () => {
+  const relay = 'http://127.0.0.1:8765';
+  const post = (payload) => fetch(relay + '/raw', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+  try {
+    const {days} = await (await fetch(relay + '/signed')).json();
+    const deviceId = localStorage.getItem('headerDeviceId');
+    const responses = {}, failed = [];
+    for (const [day, req] of Object.entries(days)) {
+      try {
+        const headers = deviceId ? {...req.headers, 'device-id': deviceId} : req.headers;
+        const r = await fetch('/api/chart/station/day/v2', {method: 'POST', credentials: 'include', headers, body: req.body});
+        if (r.ok) responses[day] = await r.json();
+        else if (r.status === 401 || r.status === 403) responses[day] = {code: String(r.status), success: false};
+        else failed.push([day, 'HTTP ' + r.status]);
+      } catch (e) { failed.push([day, String(e)]); }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    await post({responses, failed});
+  } catch (e) { await post({error: String(e)}); }
+})();
+'started'
+```
+
+It returns `'started'` immediately and keeps running in the page. **Do not `await` the loop in the tool call**: `javascript_tool` gives up after 45 seconds, and a month takes longer than that. The relay exits on its own once the page posts the responses, writing `data/solar_hourly_TARGET_MONTH.csv` and printing the same summary as the other paths; wait for the background task's completion notice and read its output.
+
+Relay exit codes: `0` written, `2` the server rejected the session (the page is not logged in; return to **4B-C**), `3` nothing arrived within 10 minutes (if its log has no `Signed 31 requests` line, the page never reached the relay: check the snippet ran on a soliscloud.com tab and that Chrome did not block the request to `127.0.0.1`).
+
+Close the tabs you opened with `tabs_close_mcp`, then go to **Step 8B**.
 
 ---
 

@@ -16,7 +16,7 @@ Most solar monitoring apps show you charts but don't tell you what to *do*. This
 
 Exports monthly 5-minute interval data from a SolisCloud-monitored solar+battery system and aggregates it into hourly CSV files.
 
-- **Two export methods:** API (primary, ~15s/month) or browser automation (fallback — cmux agent browser preferred, Chrome DevTools MCP otherwise)
+- **Two export methods:** API (primary, ~15s/month) or browser automation (fallback — cmux agent browser preferred, then Chrome DevTools MCP, then Claude in Chrome)
 - **Pure Python stdlib** — no pip dependencies for the API method
 - Outputs standardized CSV with PV, battery, grid, load, and SOC columns
 
@@ -162,6 +162,8 @@ claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 ```
 
+**Last resort — Claude in Chrome**, used when neither of the above is available. It can't read the httpOnly session cookie, so `chrome_fetch.py --serve` runs a one-shot listener on `127.0.0.1`: the logged-in page fetches signed requests from it, sends them with its own cookie, and posts the responses back. Nothing to install beyond the extension itself.
+
 If you're developing inside this repo, you can also point the symlinks directly at this checkout so edits under `skills/` are picked up immediately.
 
 ## Quick Start
@@ -215,7 +217,7 @@ solar-skills/
         ├── README.md             # Detailed documentation
         └── scripts/
             ├── api_export.py     # API-based export (pure stdlib)
-            └── chrome_fetch.py   # Browser fallback bulk fetcher (auth from cmux or DevTools MCP, fetches via Python)
+            └── chrome_fetch.py   # Browser fallback bulk fetcher (auth from cmux or DevTools MCP, or a page relay via Claude in Chrome)
 ```
 
 ## Requirements
@@ -232,7 +234,7 @@ Any Claude Code authentication method works (Pro/Max subscription or API key). T
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-The browser fallback needs one of two backends. It prefers the **cmux agent browser** ([cmux](https://cmux.com), browser panel enabled — check with `cmux browser-status`), which is driven entirely from Bash via `cmux browser` and needs no MCP server. When cmux is not available it falls back to the [Chrome DevTools MCP plugin](https://github.com/ChromeDevTools/chrome-devtools-mcp), installed and configured in Claude Code.
+The browser fallback needs one of three backends. It prefers the **cmux agent browser** ([cmux](https://cmux.com), browser panel enabled — check with `cmux browser-status`), which is driven entirely from Bash via `cmux browser` and needs no MCP server. When cmux is not available it falls back to the [Chrome DevTools MCP plugin](https://github.com/ChromeDevTools/chrome-devtools-mcp), installed and configured in Claude Code, and failing that to Claude in Chrome.
 
 ## CSV Format
 

@@ -20,11 +20,16 @@ Usage:
   # Force re-capture even if cache exists:
   python3 chrome_fetch.py 2026-01 --no-cache
 
+  # Browser-relay mode, for a browser that cannot read the httpOnly cookie
+  # (Claude in Chrome). Run in the background, then have the logged-in page
+  # GET /signed, send each request itself, and POST the responses to /raw:
+  python3 chrome_fetch.py 2026-01 --serve [--station-id ID] [--port 8765]
+
 Stdin JSON format (when providing fresh auth):
   {
     "cookie": "token=token_<uuid>",          # required; httpOnly session cookie
     "device_id": "<headerDeviceId>",         # optional; defaults to a known value
-    "station_id": "1298491919450376600"      # optional; or pass body_template
+    "station_id": "1298491919450376600"      # optional once cached; or pass body_template
   }
   (Legacy: a "body_template" object is still accepted and its "id" used as station.)
 
@@ -35,6 +40,10 @@ To obtain the cookie, from a browser logged into SolisCloud:
   - Chrome DevTools MCP: trigger one Operating-Data chart request, call
     get_network_request on it, and copy the value after "token=" in its Cookie
     header.
+  - Claude in Chrome: the cookie is out of reach (httpOnly, and the extension
+    does not expose request headers), so use --serve instead: this script
+    signs, the page sends the requests with its own cookie, and the raw
+    responses come back over 127.0.0.1.
 Auth is cached to data/.soliscloud_auth.json for CACHE_TTL_HOURS.
 """
 
@@ -47,6 +56,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from calendar import monthrange
 from datetime import datetime, timezone
 
@@ -121,7 +131,7 @@ def load_cache():
 
 
 def save_cache(auth):
-    os.makedirs('data', exist_ok=True)
+    os.makedirs(solar_data_dir(), exist_ok=True)
     with open(CACHE_PATH, 'w') as f:
         data = {'captured_at': time.time(), **auth}
         json.dump(data, f, indent=2)
@@ -164,7 +174,7 @@ def normalize_cookie(cookie):
 
 def body_template_from_context(ctx):
     body_template = dict(ctx.get('body_template') or {})
-    station_id = ctx.get('station_id') or body_template.get('id')
+    station_id = ctx.get('station_id') or body_template.get('id') or cached_station_id()
     if not station_id:
         raise ValueError('Fresh auth requires station_id or body_template.id')
 
@@ -241,17 +251,12 @@ def sign_request(body_bytes, date_str):
     return content_md5, f'WEB {web_key_id()}:{base64.b64encode(signature).decode()}'
 
 
-def fetch_day(auth, day):
-    body_template = auth['body_template']
+def signed_request(body_template, device_id, day):
+    """Return (body bytes, headers) for one day's chart request, minus the cookie."""
     body = {**body_template, 'time': day, 'localTime': int(time.time() * 1000)}
     data = json.dumps(body, separators=(',', ':')).encode()
     date_str = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
     content_md5, authorization = sign_request(data, date_str)
-    req = urllib.request.Request(
-        f'https://www.soliscloud.com{API_PATH}',
-        data=data,
-        method='POST',
-    )
     headers = {
         'Content-MD5': content_md5,
         'Time': date_str,
@@ -260,15 +265,113 @@ def fetch_day(auth, day):
         'x-cloud-platform': 'GLY',
         'version': '5.2.501',
         'platform': 'Web',
-        'device-id': auth['device_id'],
+        'device-id': device_id,
         'language': body_template.get('language', '2'),
         'Accept': 'application/json, text/plain, */*',
-        'Cookie': auth['cookie'],
     }
-    for name, value in headers.items():
+    return data, headers
+
+
+def fetch_day(auth, day):
+    data, headers = signed_request(auth['body_template'], auth['device_id'], day)
+    req = urllib.request.Request(
+        f'https://www.soliscloud.com{API_PATH}',
+        data=data,
+        method='POST',
+    )
+    for name, value in {**headers, 'Cookie': auth['cookie']}.items():
         req.add_header(name, value)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
+
+
+# --- Browser relay (--serve) ---
+
+RELAY_ORIGIN = 'https://www.soliscloud.com'
+RELAY_TIMEOUT_SECONDS = 600
+
+
+def cached_station_id():
+    """Station ID from the auth cache, whatever its age (the ID never expires)."""
+    if not os.path.exists(CACHE_PATH):
+        return None
+    with open(CACHE_PATH) as f:
+        cache = json.load(f)
+    return cache.get('station_id') or (cache.get('body_template') or {}).get('id')
+
+
+def serve_relay(target_month, station_id, port):
+    """Sign requests for a logged-in page and collect its responses.
+
+    GET /signed returns {"days": {day: {"body", "headers"}}}, signed at request
+    time so the Time headers are fresh. POST /raw takes
+    {"responses": {day: <chart response>}, "failed": [...]}. Returns the
+    responses once posted, or exits 3 if nothing arrives in time.
+    """
+    body_template = body_template_from_context({'station_id': station_id})
+    device_id = DEFAULT_DEVICE_ID
+    days = days_in_month(target_month)
+    received = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def cors(self):
+            self.send_header('Access-Control-Allow-Origin', RELAY_ORIGIN)
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            # Chrome's Private Network Access preflight for public site -> 127.0.0.1.
+            self.send_header('Access-Control-Allow-Private-Network', 'true')
+
+        def reply(self, status, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.cors()
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.cors()
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path != '/signed':
+                return self.reply(404, {'error': 'not found'})
+            signed = {}
+            for day in days:
+                data, headers = signed_request(body_template, device_id, day)
+                signed[day] = {'body': data.decode(), 'headers': headers}
+            print(f'Signed {len(signed)} requests for the page.', flush=True)
+            self.reply(200, {'days': signed})
+
+        def do_POST(self):
+            if self.path != '/raw':
+                return self.reply(404, {'error': 'not found'})
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                received.update(json.loads(self.rfile.read(length)))
+            except json.JSONDecodeError as e:
+                return self.reply(400, {'error': str(e)})
+            self.reply(200, {'ok': True})
+
+    server = HTTPServer(('127.0.0.1', port), Handler)
+    server.timeout = 5
+    deadline = time.time() + RELAY_TIMEOUT_SECONDS
+    print(f'Relay listening on http://127.0.0.1:{port} for {target_month} '
+          f'(station {station_id}).', flush=True)
+    while not received and time.time() < deadline:
+        server.handle_request()
+    server.server_close()
+    if not received:
+        print(f'No responses posted within {RELAY_TIMEOUT_SECONDS}s.', file=sys.stderr)
+        sys.exit(3)
+    if received.get('error'):
+        print(f'Page reported an error: {received["error"]}', file=sys.stderr)
+    return received
 
 
 # --- Data processing ---
@@ -352,19 +455,62 @@ def hourly_to_rows(day, hourly):
 
 # --- Main ---
 
-def main():
-    args = sys.argv[1:]
-    use_cache = '--no-cache' not in args
-    target_month = next((a for a in args if not a.startswith('--')), None)
+USAGE = 'Usage: chrome_fetch.py YYYY-MM [--no-cache] [--serve [--station-id ID] [--port N]]'
 
-    if not target_month:
-        print('Usage: chrome_fetch.py YYYY-MM [--no-cache]', file=sys.stderr)
+
+def parse_args(argv):
+    opts = {'target_month': None, 'use_cache': True, 'serve': False,
+            'station_id': None, 'port': 8765}
+    it = iter(argv)
+    for a in it:
+        if a == '--no-cache':
+            opts['use_cache'] = False
+        elif a == '--serve':
+            opts['serve'] = True
+        elif a in ('--station-id', '--port'):
+            value = next(it, None)
+            if value is None:
+                print(f'{a} needs a value.\n{USAGE}', file=sys.stderr)
+                sys.exit(1)
+            opts[a[2:].replace('-', '_')] = int(value) if a == '--port' else value
+        elif not a.startswith('--') and opts['target_month'] is None:
+            opts['target_month'] = a
+        else:
+            print(f'Unknown argument: {a}\n{USAGE}', file=sys.stderr)
+            sys.exit(1)
+    if not opts['target_month']:
+        print(USAGE, file=sys.stderr)
         sys.exit(1)
+    return opts
 
-    auth = load_auth(use_cache)
 
+def main():
+    opts = parse_args(sys.argv[1:])
+    target_month = opts['target_month']
     days = days_in_month(target_month)
-    print(f'Fetching {len(days)} days for {target_month}...', flush=True)
+
+    if opts['serve']:
+        station_id = opts['station_id'] or cached_station_id()
+        if not station_id:
+            print('No station ID: pass --station-id (from the plant details URL).', file=sys.stderr)
+            sys.exit(1)
+        relayed = serve_relay(target_month, station_id, opts['port'])
+        responses = relayed.get('responses') or {}
+        relay_failed = {f[0] if isinstance(f, list) else f: f for f in relayed.get('failed') or []}
+
+        def get_response(day):
+            if day in responses:
+                return responses[day]
+            raise RuntimeError(f'not fetched by the page ({relay_failed.get(day, "missing")})')
+        print(f'Received {len(responses)} days from the page.', flush=True)
+    else:
+        auth = load_auth(opts['use_cache'])
+        print(f'Fetching {len(days)} days for {target_month}...', flush=True)
+
+        def get_response(day):
+            resp = fetch_day(auth, day)
+            time.sleep(0.3)
+            return resp
 
     rows = [CSV_HEADER]
     total_pv_kwh = 0
@@ -373,9 +519,12 @@ def main():
 
     for i, day in enumerate(days):
         try:
-            resp = fetch_day(auth, day)
+            resp = get_response(day)
             if resp.get('code') in ('401', '403') or resp.get('success') is False:
-                print(f'\nAuth rejected by server. Delete {CACHE_PATH} and re-run with fresh browser capture.', file=sys.stderr)
+                if opts['serve']:
+                    print('\nAuth rejected by server: the page is not logged into SolisCloud.', file=sys.stderr)
+                else:
+                    print(f'\nAuth rejected by server. Delete {CACHE_PATH} and re-run with fresh browser capture.', file=sys.stderr)
                 sys.exit(2)
             data = resp.get('data') or {}
             hourly = aggregate_day(data)
@@ -396,10 +545,7 @@ def main():
             print(f'  {day}: FAILED — {e}', flush=True)
             failed.append(day)
 
-        if i < len(days) - 1:
-            time.sleep(0.3)
-
-        if (i + 1) % 5 == 0:
+        if (i + 1) % 5 == 0 and not opts['serve']:
             print(f'  {i + 1}/{len(days)} done', flush=True)
 
     data_dir = solar_data_dir()
